@@ -6,10 +6,11 @@ import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { useSession } from '@/auth/AuthProvider';
-import { assetsApi, manifestForDownload, shortHash, useAsset } from '@/api/assets';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth, useSession } from '@/auth/AuthProvider';
+import { assetDenied, assetsApi, manifestForDownload, useAsset } from '@/api/assets';
 import { creativesApi, currentValidation, latestValidation } from '@/api/creatives';
+import { http } from '@/api/http';
 import { isApiError } from '@/api/errors';
 import { isInProgress, passedAssessedChecks } from '@/api/validations';
 import { Badge } from '@/components/ui/Badge';
@@ -17,6 +18,8 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, SkeletonRows, TwoColumn } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
+import { AssetProvenance } from '@/components/media/GeneratedImagePreview';
+import { SIMULATION_BUILD } from '@/config/env';
 import { fmtDateTime } from '@/lib/utils';
 import { useValidationRun } from '@/pages/validation/useValidation';
 import { formatLabel, languageLabel, PostPreview } from './parts';
@@ -29,6 +32,8 @@ import { formatLabel, languageLabel, PostPreview } from './parts';
 export default function FinalPreview() {
   const { creativeId = '' } = useParams();
   const { context } = useSession();
+  const { mode } = useAuth();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const { toast } = useToast();
   const q = useQuery({
@@ -38,6 +43,8 @@ export default function FinalPreview() {
   });
   const creative = q.data?.creative;
   const asset = useAsset(creative?.asset_id);
+  // An image the API now refuses is not described from the cache either.
+  const image = assetDenied(asset.error) ? undefined : asset.data;
   const latest = creative ? latestValidation(creative) : undefined;
   const run = useValidationRun(latest?.validation_run_id ?? '');
   const [exporting, setExporting] = useState(false);
@@ -67,7 +74,7 @@ export default function FinalPreview() {
   const fullRun = latest && run.data?.validation_run_id === latest.validation_run_id ? run.data : undefined;
   const passed = !!current && !!fullRun && fullRun.is_current && passedAssessedChecks(fullRun);
   const studyChanged = !!study && study.version !== creative.study_snapshot_version;
-  const imageAfterEdit = !!asset.data && Date.parse(creative.updated_at) > Date.parse(asset.data.created_at);
+  const imageAfterEdit = !!image && Date.parse(creative.updated_at) > Date.parse(image.created_at);
 
   const download = async () => {
     setExporting(true);
@@ -89,6 +96,13 @@ export default function FinalPreview() {
     } finally {
       setExporting(false);
     }
+  };
+
+  // Simulation only: the fake API answers the next image request this way, then the image is asked for again.
+  const simulateImage = async (kind: string, done: string) => {
+    await http.post('/__sim/next-image-link', { mode: kind });
+    toast(done, 'waiting');
+    await qc.invalidateQueries({ queryKey: ['asset', context.tenant.tenant_id, creative.asset_id] });
   };
 
   const validation: ReactNode = !latest
@@ -132,13 +146,9 @@ export default function FinalPreview() {
 
       <TwoColumn>
         <section aria-label="Post preview"><VStack gap={4}>
-          {creative.asset_id && asset.isPending
-            ? <Card><SkeletonRows rows={6} /></Card>
-            : (
-              <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
-                image={asset.data?.download_url ? { src: asset.data.download_url, alt: `Image for version ${creative.version} of this draft${asset.data.provider === 'simulation' ? ' (simulation placeholder)' : ''}` } : undefined} />
-            )}
-          {asset.isError && <Alert tone="waiting" title="The image could not be loaded">The rest of the preview is still exact.</Alert>}
+          {/* Provenance is in "What this preview is", so the image shows without its caption here. */}
+          <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
+            image={creative.asset_id ? { assetId: creative.asset_id, alt: `Image for version ${creative.version} of this draft`, provenance: false } : undefined} />
         </VStack></section>
 
         <VStack gap={4}>
@@ -158,16 +168,9 @@ export default function FinalPreview() {
                 </Pair>
                 <Pair k="Policy bundle">{fullRun?.policy_bundle_version ? <Text type="code">{fullRun.policy_bundle_version}</Text> : <Text type="body" color="secondary">Not reported</Text>}</Pair>
                 <Pair k="Image">
-                  {!asset.data ? <Text type="body" color="secondary">None yet</Text> : (
-                    <VStack gap={0.5}>
-                      <Text type="body">
-                        {asset.data.origin === 'generated' ? 'Generated' : 'Uploaded'}
-                        {asset.data.provider && <> by {asset.data.provider}{asset.data.model && ` (${asset.data.model})`}</>}
-                        {' · '}{asset.data.width_px}×{asset.data.height_px} · {fmtDateTime(asset.data.created_at)}
-                      </Text>
-                      <Text type="supporting" color="secondary">Reference {shortHash(asset.data.checksum_sha256)}</Text>
-                    </VStack>
-                  )}
+                  {image
+                    ? <AssetProvenance asset={image} />
+                    : <Text type="body" color="secondary">{!creative.asset_id ? 'None yet' : asset.isPending ? 'Loading' : 'Not available'}</Text>}
                 </Pair>
               </MetadataList>
             </CardBody>
@@ -179,6 +182,18 @@ export default function FinalPreview() {
               <CardBody>
                 <Text type="body" color="secondary">Must appear exactly as written. Shown in full.</Text>
                 {study.facts.required_disclosures.map((t, i) => <Text key={i} type="body" wordBreak="break-word">{t}</Text>)}
+              </CardBody>
+            </Card>
+          )}
+
+          {SIMULATION_BUILD && mode === 'simulation' && creative.asset_id && (
+            <Card>
+              <CardHead title="Simulation tools" icon="warn" />
+              <CardBody>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('expired', 'The image link expired')}>Expire the image link</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('expired-twice', 'The image link expired, and the next one too')}>Expire the image link twice</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('unavailable', 'The image link expired and storage is not answering')}>Expire the link with storage unavailable</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('other-organisation', 'The image now belongs to another organisation')}>Move the image to another organisation</Button>
               </CardBody>
             </Card>
           )}

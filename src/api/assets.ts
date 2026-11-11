@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
+import { isApiError } from './errors';
 import { http } from './http';
 import type { components } from './schema';
 
@@ -44,3 +45,11 @@ export function manifestForDownload(m: ExportManifest) {
 }
 
 export const shortHash = (sha: string) => sha.slice(0, 12);
+
+const SIMULATION_PROVIDERS = new Set(['simulation', 'simulator']);
+
+/** Made by the simulation provider: a labelled placeholder, not a real generated image. */
+export const isSimulatedAsset = (a: Pick<Asset, 'provider'>) => SIMULATION_PROVIDERS.has(a.provider?.toLowerCase() ?? '');
+
+/** The API says the image does not exist or is not this user's to see: never show it, even from cache. */
+export const assetDenied = (e: unknown) => isApiError(e) && (e.kind === 'not_found' || e.kind === 'forbidden');

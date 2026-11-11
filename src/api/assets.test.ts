@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { manifestForDownload, shortHash, type ExportManifest } from './assets';
+import { assetDenied, isSimulatedAsset, manifestForDownload, shortHash, type ExportManifest } from './assets';
+import { ApiError } from './errors';
 
 const manifest: ExportManifest = {
   status: 'DRAFT', creative_id: 'c1', creative_version: 3, caption: 'Caption', study_snapshot_version: 2,
@@ -24,5 +25,23 @@ describe('manifestForDownload', () => {
 
   it('shortens the checksum for display', () => {
     expect(shortHash('abcdef0123456789')).toBe('abcdef012345');
+  });
+});
+
+describe('isSimulatedAsset', () => {
+  it('labels both simulation provider names, in any case', () => {
+    expect(isSimulatedAsset({ provider: 'simulation' })).toBe(true);
+    expect(isSimulatedAsset({ provider: 'Simulator' })).toBe(true);
+    expect(isSimulatedAsset({ provider: 'higgsfield' })).toBe(false);
+    expect(isSimulatedAsset({ provider: null })).toBe(false);
+  });
+});
+
+describe('assetDenied', () => {
+  it('is true for not found and forbidden only', () => {
+    expect(assetDenied(new ApiError(404))).toBe(true);
+    expect(assetDenied(new ApiError(403))).toBe(true);
+    expect(assetDenied(new ApiError(503))).toBe(false);
+    expect(assetDenied(new Error('x'))).toBe(false);
   });
 });

@@ -13,7 +13,6 @@ import { HStack, StackItem, VStack } from '@astryxdesign/core/Layout';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { useAuth, useSession } from '@/auth/AuthProvider';
-import { useAsset } from '@/api/assets';
 import { creativesApi } from '@/api/creatives';
 import { fieldMessagesOf, isApiError } from '@/api/errors';
 import { workspaceApi, type ApprovalRequest, type Decision } from '@/api/workspace';
@@ -111,7 +110,7 @@ function Review() {
     queryFn: ({ signal }) => creativesApi.get(a!.creative_id, signal),
     enabled: !!a,
   });
-  const asset = useAsset(creative.data?.creative.asset_id);
+  const assetId = creative.data?.creative.asset_id;
   const [decision, setDecision] = useState<Decision | ''>('');
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState<{ decision?: string; reason?: string }>({});
@@ -177,7 +176,7 @@ function Review() {
       <Grid columns={{ minWidth: 340, repeat: 'fit' }} gap={6}>
         <section aria-label="Post preview"><VStack gap={4}>
           <PostPreview tenantName={context.tenant.name} caption={a.caption} format={format} full
-            image={asset.data?.download_url ? { src: asset.data.download_url, alt: `Image for version ${a.creative_version}${asset.data.provider === 'simulation' ? ' (simulation placeholder)' : ''}` } : undefined} />
+            image={assetId ? { assetId, alt: `Image for version ${a.creative_version}` } : undefined} />
           <Card>
             <CardHead title="Brief" />
             <Text type="body" wordBreak="break-word">{a.prompt}</Text>

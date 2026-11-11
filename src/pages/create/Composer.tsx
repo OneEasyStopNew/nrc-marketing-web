@@ -5,7 +5,6 @@ import { HStack, VStack, StackItem } from '@astryxdesign/core/Layout';
 import { Grid } from '@astryxdesign/core/Grid';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAsset } from '@/api/assets';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth, useSession } from '@/auth/AuthProvider';
 import type { StudySnapshot } from '@/api/session';
@@ -51,7 +50,6 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   const qc = useQueryClient();
   const ed = useDraftEditor({ initial, readOnly });
   const creative = ed.base?.creative;
-  const asset = useAsset(creative?.asset_id);
 
   const firstFormat = context.post_formats[0];
   const [setup, setSetup] = useState<DraftSetup>(() => creative
@@ -205,7 +203,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           <SaveStatus state={ed.state} version={creative?.version} />
         </HStack>
         <PostPreview tenantName={context.tenant.name} caption={ed.text.caption} format={format}
-          image={asset.data?.download_url ? { src: asset.data.download_url, alt: 'Image for this draft' + (asset.data.provider === 'simulation' ? ' (simulation placeholder)' : '') } : undefined} />
+          image={creative?.asset_id ? { assetId: creative.asset_id, alt: 'Image for this draft' } : undefined} />
         {creative && (
           <Button variant="secondary" block href={`/marketing/create/${encodeURIComponent(creative.id)}/preview`}
             onClick={(e) => { if (ed.dirty) { e.preventDefault(); toast('Save your changes first', 'waiting', 'The final preview shows saved versions only.'); } }}>

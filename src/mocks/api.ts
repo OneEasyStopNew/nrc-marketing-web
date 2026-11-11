@@ -236,9 +236,24 @@ const ROUTES: Record<string, Handler> = {
   'GET /assets/:id': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
+    const next = mockServer.nextImageLinks.shift();
     const a = req.data.ASSETS.find((x) => x.asset_id === req.params.id && x.tenant_id === req.tenantId);
-    if (!a) return problem(404, 'NOT_FOUND', 'This image does not exist or is not available to you.');
-    return json(200, assetRead(a));
+    // Another organisation's image is answered exactly like a missing one.
+    if (!a || next === 'other-organisation') return problem(404, 'NOT_FOUND', 'This image does not exist or is not available to you.');
+    if (next === 'unavailable') return problem(503, 'STORAGE_UNAVAILABLE', 'Image storage is temporarily unavailable. Try again.', true);
+    return json(200, next === 'expired' ? { ...assetRead(a), download_url: EXPIRED_IMAGE_LINK } : assetRead(a));
+  },
+
+  /** expired: a link the browser cannot load; expired-twice: the renewed one too; unavailable: expired, then storage 503s. */
+  'POST /__sim/next-image-link': (req) => {
+    const mode = (req.body as { mode?: string } | undefined)?.mode;
+    mockServer.nextImageLinks = mode === 'expired' ? ['expired']
+      : mode === 'expired-twice' ? ['expired', 'expired']
+        // The link expires and storage is down while renewing it; the client retries a 503 twice, so all three tries fail.
+        : mode === 'unavailable' ? ['expired', 'unavailable', 'unavailable', 'unavailable']
+          : mode === 'other-organisation' ? ['other-organisation']
+            : [];
+    return json(200, { ok: true });
   },
 
   'GET /creatives/:id/export': (req) => {
@@ -631,6 +646,9 @@ function needCap({ user, tenantId }: MockRequest, cap: Capability) {
 }
 
 /* ---------- Image helpers ---------- */
+
+/** Stands in for a signed link that has expired: the browser cannot draw it. */
+const EXPIRED_IMAGE_LINK = 'data:image/png;base64,ZXhwaXJlZA==';
 
 /** The asset with a short-lived link: a labelled placeholder picture, clearly not a real generated image. */
 function assetRead(a: MockAsset) {
