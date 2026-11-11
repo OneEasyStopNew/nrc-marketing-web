@@ -56,7 +56,8 @@ test('one organisation opens straight in, with capabilities from the server', as
   await expect(homeItem(page, 'Create post')).toBeVisible();
   await expect(homeItem(page, 'Validation')).toBeVisible();
   await expect(homeItem(page, 'Approvals')).toHaveCount(0);
-  await expect(homeItem(page, 'Rules')).toHaveCount(0);
+  // NRC-20: creators read the active policy (creative:read), read-only.
+  await expect(homeItem(page, 'Rules')).toBeVisible();
 });
 
 test('a route outside the role shows the reason and never the page', async ({ page }) => {

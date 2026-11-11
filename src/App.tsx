@@ -19,7 +19,7 @@ const Section = lazy(() => import('@/pages/Section'));
 const CreatePage = lazy(() => import('@/pages/create/CreatePage'));
 const ValidationPage = lazy(() => import('@/pages/validation/ValidationPage'));
 const MediaPage = lazy(() => import('@/pages/media/MediaPage'));
-const RulesPage = lazy(() => import('@/pages/rules/RulesPage'));
+const RulesSection = lazy(() => import('@/pages/rules/RulesSection'));
 const ApprovalsPage = lazy(() => import('@/pages/approvals/ApprovalsPage'));
 const PublicationsPage = lazy(() => import('@/pages/publications/PublicationsPage'));
 const AccountsPage = lazy(() => import('@/pages/accounts/AccountsPage'));
@@ -30,7 +30,7 @@ const PAGES: Record<string, React.ComponentType> = {
   '/marketing/create': CreatePage,
   '/marketing/validation': ValidationPage,
   '/marketing/media': MediaPage,
-  '/marketing/rules': RulesPage,
+  '/marketing/rules': RulesSection,
   '/marketing/approvals': ApprovalsPage,
   '/marketing/publications': PublicationsPage,
   '/marketing/integrations': AccountsPage,

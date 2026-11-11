@@ -311,6 +311,14 @@ const ROUTES: Record<string, Handler> = {
     return new Response(null, { status: 204 });
   },
 
+  /** Dinesh's GET /policies/active (live on his demo API, not yet in contracts/openapi.json). */
+  'GET /policies/active': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const policy = req.data.ACTIVE_POLICIES?.[req.tenantId ?? ''];
+    return policy ? json(200, policy) : problem(404, 'NOT_FOUND', 'This organisation has no active policy.');
+  },
+
   'GET /rules': (req) => {
     const denied = needCap(req, 'creative:read');
     return denied ?? json(200, ws(req).rules);

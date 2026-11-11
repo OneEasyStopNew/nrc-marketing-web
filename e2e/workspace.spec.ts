@@ -102,7 +102,8 @@ test('a publisher queues an approved post; it is never shown as published', asyn
 });
 
 test('a policy administrator drafts a rule with its source, then activates it', async ({ page }) => {
-  await signInAt(page, '/marketing/rules', 'policy-admin');
+  // Rule administration is parked under /manage while the Rules section shows the read-only active policy (NRC-20).
+  await signInAt(page, '/marketing/rules/manage', 'policy-admin');
   await page.getByRole('button', { name: 'New rule' }).click();
   const dialog = page.getByRole('dialog', { name: 'New rule' });
   await dialog.getByRole('button', { name: 'Save draft' }).click();
@@ -147,7 +148,7 @@ test('an administrator invites someone and changes roles; a role is always requi
 test('pages outside the role are refused, not hidden behind a blank screen', async ({ page }) => {
   await signInAt(page, '/marketing/team', 'creator');
   await expect(seen(page, 'Not available with your role')).toBeVisible();
-  await signInAt(page, '/marketing/rules', 'publisher');
+  await signInAt(page, '/marketing/rules/manage', 'publisher');
   await expect(seen(page, 'Not available with your role')).toBeVisible();
 });
 

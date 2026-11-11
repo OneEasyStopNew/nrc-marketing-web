@@ -2,6 +2,7 @@ import type { Capability, Language, PostFormat, StudySnapshot, TenantMembership 
 import type { components } from '@/api/schema';
 import type { Creative } from '@/api/creatives';
 import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount } from '@/api/workspace';
+import type { ActivePolicy } from '@/api/policies';
 
 /**
  * Shape of the local dummy data file `src/mocks/data.ts`.
@@ -98,6 +99,13 @@ export interface MockData {
   WORKSPACE: Record<string, MockWorkspace>;
   /** Policy bundle version the fake validator reports. */
   POLICY_BUNDLE_VERSION: string;
+  /**
+   * Active policy per tenant id, served by GET /policies/active (NRC-20).
+   * Optional so older data.ts files still compile. Missing tenant (or the
+   * whole field) = no active policy, answered as 404 NOT_FOUND. Rules here
+   * are visibly synthetic, never real IPB wording.
+   */
+  ACTIVE_POLICIES?: Record<string, ActivePolicy>;
 }
 
 /**
