@@ -1,4 +1,4 @@
-import type { MockCreative, MockValidationRun, MockWorkspace } from './types';
+import type { MockCreative, MockJob, MockValidationRun, MockWorkspace } from './types';
 
 /**
  * In-memory state of the pretend authorization server and API, shared by the
@@ -11,6 +11,7 @@ import type { MockCreative, MockValidationRun, MockWorkspace } from './types';
 const DRAFTS_KEY = 'nrc.sim.creatives';
 const RUNS_KEY = 'nrc.sim.validations';
 const WORKSPACE_KEY = 'nrc.sim.workspace';
+const JOBS_KEY = 'nrc.sim.jobs';
 
 export const mockServer = {
   /** Issued access token → dummy user id. */
@@ -21,6 +22,8 @@ export const mockServer = {
   failNextWrite: false,
   /** Set by the simulation tools: how the next validation run fails. */
   nextValidationFailure: null as null | 'timeout' | 'extraction',
+  /** Set by the simulation tools: how the next Generate is answered. */
+  nextGeneration: null as null | 'rejected' | 'unknown' | 'limit' | 'lost',
   /** Create requests already handled: `${tenant}:${Idempotency-Key}` → payload and the draft it made. */
   idempotency: new Map<string, { payload: string; id: string }>(),
 
@@ -63,6 +66,20 @@ export const mockServer = {
     if (!runs) return;
     try { sessionStorage.setItem(RUNS_KEY, JSON.stringify([...runs.values()])); } catch { /* storage blocked */ }
   },
+
+  /** Generation jobs by id, kept across reloads so refresh recovery can be tried. */
+  jobs(): Map<string, MockJob> {
+    if (!jobs) {
+      let stored: MockJob[] | null = null;
+      try { stored = JSON.parse(sessionStorage.getItem(JOBS_KEY) ?? 'null'); } catch { /* start empty */ }
+      jobs = new Map((stored ?? []).map((j) => [j.final.job_id, j]));
+    }
+    return jobs;
+  },
+  saveJobs() {
+    if (!jobs) return;
+    try { sessionStorage.setItem(JOBS_KEY, JSON.stringify([...jobs.values()])); } catch { /* storage blocked */ }
+  },
 };
 
 /** Media, rules, approvals, accounts, publications and team per tenant, seeded from data.ts. */
@@ -82,3 +99,4 @@ export function saveWorkspaces() {
 let workspaces: Record<string, MockWorkspace> | null = null;
 let creatives: Map<string, MockCreative> | null = null;
 let runs: Map<string, MockValidationRun> | null = null;
+let jobs: Map<string, MockJob> | null = null;

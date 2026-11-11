@@ -69,12 +69,13 @@ test('an edit autosaves a new version and makes the old validation out of date a
   await signInAt(page, SEEDED, 'creator');
   await expect(status(page)).toHaveText('Saved · version 3');
   await expect(seen(page, 'Passed the assessed checks')).toBeVisible();
-  // Generation eligibility is not in the backend contract yet: never offered.
-  await expect(page.getByRole('button', { name: 'Generate image' })).toBeDisabled();
+  // Version 3 passed, so Generate is offered (NRC-21); any edit takes it away until the new version passes.
+  await expect(page.getByRole('button', { name: 'Generate image' })).toBeEnabled();
 
   await caption(page).press('Control+End');
   await caption(page).pressSequentially(' More.');
   await expect(seen(page, 'Out of date')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate image' })).toBeDisabled();
   await expect(seen(page, 'The brief changed after the last validation.')).toBeVisible();
 
   await expect(status(page)).toHaveText('Saved · version 4', { timeout: 10_000 });

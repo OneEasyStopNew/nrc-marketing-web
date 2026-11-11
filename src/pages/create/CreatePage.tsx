@@ -20,6 +20,7 @@ export default function CreatePage() {
     <Routes>
       <Route index element={<NewBrief />} />
       <Route path=":creativeId" element={<ExistingDraft />} />
+      <Route path=":creativeId/generation/:jobId" element={<ExistingDraft />} />
       <Route path=":creativeId/preview" element={<FinalPreview />} />
     </Routes>
   );

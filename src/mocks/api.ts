@@ -2,7 +2,8 @@ import { API_PREFIX } from '@/config/env';
 import { TENANT_HEADER } from '@/api/http';
 import type { Capability, ContextWire, MeWire } from '@/api/session';
 import { CAPTION_MAX, PROMPT_MAX, type Creative } from '@/api/creatives';
-import type { DummyUser, MockAsset, MockCreative, MockData, MockValidationRun } from './types';
+import type { DummyUser, MockAsset, MockCreative, MockData, MockJob, MockValidationRun } from './types';
+import type { Job } from '@/api/jobs';
 import type { ValidationRun as ValidationRunRead } from '@/api/validations';
 import { evaluate } from './validator';
 import { loadMockData, MOCK_DATA_PATH } from './load';
@@ -231,12 +232,98 @@ const ROUTES: Record<string, Handler> = {
     return json(200, { ok: true });
   },
 
+  /* ---------- Generation jobs (NRC-6 / NRC-10 / NRC-21) ---------- */
+
+  'POST /creative-jobs': (req) => {
+    const denied = needCap(req, 'generation:run');
+    if (denied) return denied;
+    const key = req.idempotencyKey;
+    if (!key || !/^[A-Za-z0-9_-]{8,128}$/.test(key)) {
+      return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key of 8 to 128 letters, digits, _ or -.', type: 'missing' }]);
+    }
+    const body = req.body as { creative_id?: string; creative_version?: number; kind?: string };
+    const payload = JSON.stringify(body);
+    const earlier = mockServer.idempotency.get(`${req.tenantId}:job:${key}`);
+    if (earlier) {
+      // Same command again (double click, lost response): the job it already made, never a second one.
+      if (earlier.payload !== payload) return problem(409, 'IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request.');
+      const prior = mockServer.jobs().get(earlier.id)!;
+      return json(202, { job_id: prior.final.job_id, state: readJob(prior).state }, { Location: `${API_PREFIX}/jobs/${prior.final.job_id}` });
+    }
+    if (body.kind !== 'image_generation') return fieldsProblem([{ loc: ['body', 'kind'], msg: "Input should be 'image_generation'", type: 'enum' }]);
+    const c = store(req).get(body.creative_id ?? '');
+    if (!c || c.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
+    if (body.creative_version !== c.version) {
+      return problem(412, 'VERSION_CONFLICT', 'The creative changed since you loaded it.', false, { current_version: c.version });
+    }
+    const study = (req.data.STUDIES[c.tenant_id] ?? []).find((st) => st.study_id === c.study_id);
+    if (study?.recruitment_status !== 'recruiting') {
+      return problem(409, 'GENERATION_NOT_ELIGIBLE', 'This draft cannot be generated.', false, { reason: 'STUDY_NOT_RECRUITING' });
+    }
+    // The validation gate (NRC-7): only a version whose current run passed.
+    const latest = runsFor(req, c)[0];
+    const run = latest ? readRun(latest, c) : null;
+    if (!run || !run.is_current || run.state !== 'SUCCEEDED' || run.outcome !== 'PASS') {
+      return problem(409, 'VALIDATION_NOT_PASSED', 'This version has not passed validation.', false, { validation_run_id: run?.validation_run_id ?? null });
+    }
+    const sim = mockServer.nextGeneration;
+    mockServer.nextGeneration = null;
+    if (sim === 'limit') {
+      return problem(429, 'GENERATION_LIMIT_REACHED', 'Your organisation has reached its image limit for today.', false, { reason: 'CREDIT_CEILING' });
+    }
+    const active = [...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(readJob(j).state));
+    if (active.length >= 2) return problem(429, 'GENERATION_LIMIT_REACHED', 'Too many images are being made at once.', true, { reason: 'ACTIVE_JOB_LIMIT' });
+
+    const id = `sim-gen-${crypto.randomUUID().slice(0, 8)}`;
+    const outcome: MockJob['outcome'] = sim === 'rejected' ? 'rejected' : sim === 'unknown' ? 'unknown' : 'image';
+    const now = new Date().toISOString();
+    const assetId = `sim-img-${id.slice(8)}`;
+    const job: MockJob = {
+      tenant_id: c.tenant_id, started_ms: Date.now(), outcome,
+      final: {
+        job_id: id, kind: 'image_generation', creative_id: c.id, creative_version: c.version,
+        state: outcome === 'image' ? 'SUCCEEDED' : outcome === 'rejected' ? 'FAILED' : 'UNKNOWN',
+        stage: outcome === 'image' ? 'stored' : outcome === 'unknown' ? 'reconcile' : null,
+        provider_request_id: `sim-request-${id.slice(8)}`,
+        failure_code: outcome === 'rejected' ? 'content_rejected' : null,
+        failure_message: null,
+        result_asset_id: outcome === 'image' ? assetId : null,
+        created_at: now, updated_at: now, completed_at: null,
+      },
+      asset: outcome === 'image' ? {
+        tenant_id: c.tenant_id, asset_id: assetId, creative_id: c.id, origin: 'generated', mime_type: 'image/png',
+        width_px: 1080, height_px: 1080, size_bytes: 0, checksum_sha256: fakeChecksum(),
+        provider: 'simulation', model: 'simulation', created_at: now,
+      } : null,
+    };
+    mockServer.jobs().set(id, job);
+    mockServer.saveJobs();
+    mockServer.idempotency.set(`${req.tenantId}:job:${key}`, { payload, id });
+    // The job exists, but its answer never reaches the browser (like a dropped connection).
+    if (sim === 'lost') throw new TypeError('Failed to fetch (simulated lost response)');
+    return json(202, { job_id: id, state: 'QUEUED' }, { Location: `${API_PREFIX}/jobs/${id}` });
+  },
+
+  'GET /jobs/:id': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const job = mockServer.jobs().get(req.params.id);
+    if (!job || job.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This job does not exist or is not available to you.');
+    return json(200, readJob(job));
+  },
+
+  'POST /__sim/next-generation/:mode': (req) => {
+    const mode = req.params.mode;
+    mockServer.nextGeneration = mode === 'rejected' || mode === 'unknown' || mode === 'limit' || mode === 'lost' ? mode : null;
+    return json(200, { ok: true });
+  },
+
   /* ---------- Images and export (NRC-23) ---------- */
 
   'GET /assets/:id': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
-    const a = req.data.ASSETS.find((x) => x.asset_id === req.params.id && x.tenant_id === req.tenantId);
+    const a = req.data.ASSETS.find((x) => x.asset_id === req.params.id && x.tenant_id === req.tenantId) ?? generatedAsset(req.params.id, req.tenantId);
     if (!a) return problem(404, 'NOT_FOUND', 'This image does not exist or is not available to you.');
     return json(200, assetRead(a));
   },
@@ -629,6 +716,35 @@ function needCap({ user, tenantId }: MockRequest, cap: Capability) {
   const grant = tenantId ? user.grants[tenantId] : undefined;
   return grant?.capabilities.includes(cap) ? null : problem(403, 'FORBIDDEN', 'Your role does not allow this here.');
 }
+
+/* ---------- Generation helpers ---------- */
+
+const JOB_QUEUED_MS = 800;
+const JOB_SUBMIT_MS = 1600;
+const JOB_PROVIDER_MS = 4000;
+const JOB_STORE_MS = 5000;
+
+/** The job as it reads now: queued, submitting, waiting on the provider, saving, then final. */
+function readJob(j: MockJob): Job {
+  const elapsed = Date.now() - j.started_ms;
+  const at = (ms: number) => new Date(j.started_ms + ms).toISOString();
+  const running = { ...j.final, failure_code: null, result_asset_id: null, completed_at: null };
+  if (elapsed < JOB_QUEUED_MS) return { ...running, state: 'QUEUED', stage: null, provider_request_id: null, updated_at: j.final.created_at };
+  if (elapsed < JOB_SUBMIT_MS) return { ...running, state: 'RUNNING', stage: 'submitting', provider_request_id: null, updated_at: at(JOB_QUEUED_MS) };
+  if (j.outcome === 'unknown') return { ...j.final, updated_at: at(JOB_SUBMIT_MS) };
+  if (elapsed < JOB_PROVIDER_MS) return { ...running, state: 'WAITING_PROVIDER', stage: 'waiting_provider', updated_at: at(JOB_SUBMIT_MS) };
+  if (j.outcome === 'rejected') return { ...j.final, updated_at: at(JOB_PROVIDER_MS), completed_at: at(JOB_PROVIDER_MS) };
+  if (elapsed < JOB_STORE_MS) return { ...running, state: 'RUNNING', stage: 'fetching_output', updated_at: at(JOB_PROVIDER_MS) };
+  return { ...j.final, updated_at: at(JOB_STORE_MS), completed_at: at(JOB_STORE_MS) };
+}
+
+/** An image a simulated job saved, once that job has finished. */
+function generatedAsset(assetId: string, tenantId: string | null): MockAsset | undefined {
+  const job = [...mockServer.jobs().values()].find((j) => j.asset?.asset_id === assetId && j.tenant_id === tenantId);
+  return job && readJob(job).state === 'SUCCEEDED' ? job.asset ?? undefined : undefined;
+}
+
+const fakeChecksum = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
 
 /* ---------- Image helpers ---------- */
 

@@ -175,11 +175,22 @@ export function SaveStatus({ state, version }: { state: SaveState; version?: num
  * Local edits make the last result out of date immediately. Generation
  * eligibility is not in the contract yet, so the UI never offers Generate.
  */
-export function ReadinessCard({ creative, editing, validate }: {
+/** What the readiness card shows about generation. */
+export interface GenerationSummary {
+  variant: 'neutral' | 'done' | 'blocked' | 'waiting' | 'brand';
+  text: string;
+  note?: string;
+  /** Present when Generate may be pressed now (role, saved version, no job running or unconfirmed). */
+  start?: { onClick: () => void; busy: boolean };
+}
+
+export function ReadinessCard({ creative, editing, validate, generation }: {
   creative: Creative;
   editing: boolean;
   /** Present when this user may run validation on this draft now. */
   validate?: { onClick: () => void; busy: boolean };
+  /** Generation status for this draft; `start` is present when this user may generate now. */
+  generation: GenerationSummary;
 }) {
   const current = currentValidation(creative);
   const latest = latestValidation(creative);
@@ -196,22 +207,33 @@ export function ReadinessCard({ creative, editing, validate }: {
   else if (current.outcome === 'NEEDS_REVIEW') validation = { variant: 'waiting', text: 'Needs review', note: `For version ${current.creative_version}.` };
   else validation = { variant: 'blocked', text: 'Could not finish', note: 'Run validation again.' };
 
+  // Generate only for the saved version whose current run passed; the backend checks again.
+  const passed = !!current && current.state === 'SUCCEEDED' && current.outcome === 'PASS';
+  const canGenerate = !!generation.start && !editing && passed;
+  const generateNext = passed && !editing && !!generation.start;
+  const generateHint = !generation.start
+    ? generation.note ?? 'Generation is not available for your role or this draft right now.'
+    : passed ? 'Generate makes one image for this version. It is a draft until its final validation.'
+      : 'Generate becomes available when this version passes validation.';
+
   return (
     <Card>
       <CardHead title="Validation and generation" />
       <CardBody>
         <Row label="Status"><Badge>Draft for review</Badge></Row>
         <Row label="Validation" note={validation.note}><Badge variant={validation.variant}>{validation.text}</Badge></Row>
-        <Row label="Generation" note={editing ? 'Save your changes, then validate this version.' : 'Generation is not connected yet.'}>
-          <Badge>Not available yet</Badge>
+        <Row label="Generation" note={editing ? 'Save your changes, then validate this version.' : generation.note}>
+          <Badge variant={generation.variant}>{generation.text}</Badge>
         </Row>
       </CardBody>
       <CardFoot>
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Button variant="primary" icon="shield" disabled={!validate || editing || inProgress} loading={validate?.busy} onClick={validate?.onClick}>
+          <Button variant={generateNext ? 'secondary' : 'primary'} icon="shield" disabled={!validate || editing || inProgress} loading={validate?.busy} onClick={validate?.onClick}>
             Validate version {creative.version}
           </Button>
-          <Button variant="secondary" icon="img" disabled>Generate image</Button>
+          <Button variant={generateNext ? 'primary' : 'secondary'} icon="img" disabled={!canGenerate} loading={generation.start?.busy} onClick={generation.start?.onClick}>
+            Generate image
+          </Button>
         </HStack>
         {shown && (
           <AxLink href={`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(shown.validation_run_id)}`}>
@@ -219,7 +241,7 @@ export function ReadinessCard({ creative, editing, validate }: {
           </AxLink>
         )}
         <Text type="supporting" color="secondary">
-          {editing ? 'Changes save first; then validate the new version.' : 'Generation is not connected in this build yet.'}
+          {editing ? 'Changes save first; then validate the new version.' : generateHint}
         </Text>
       </CardFoot>
     </Card>

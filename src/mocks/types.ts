@@ -74,6 +74,23 @@ export interface MockValidationRun {
   final: components['schemas']['ValidationRunRead'];
 }
 
+/**
+ * A generation job made in this tab (NRC-21). Jobs are never seeded from
+ * data.ts: they exist only after Generate. The fake API moves each one through
+ * the backend's states over a few seconds, then reads as `final`.
+ */
+export interface MockJob {
+  tenant_id: string;
+  /** Epoch ms the job was accepted. */
+  started_ms: number;
+  /** How the simulated provider answers: makes the image, refuses it, or never confirms. */
+  outcome: 'image' | 'rejected' | 'unknown';
+  /** The job as it reads once finished. */
+  final: components['schemas']['JobRead'];
+  /** The stored image, served only once the job has SUCCEEDED. */
+  asset: MockAsset | null;
+}
+
 /** What data.ts must export. Later tickets add their collections here. */
 export interface MockData {
   TENANTS: Record<string, TenantMembership>;

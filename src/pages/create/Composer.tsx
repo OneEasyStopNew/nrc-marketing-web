@@ -25,6 +25,10 @@ import {
 import { useDraftEditor } from './useDraftEditor';
 import { FindingsToFix, VersionHistory } from './revisions';
 import { useStartValidation } from '@/pages/validation/useValidation';
+import { isJobOutcomeUnknown, isJobTerminal } from '@/api/jobs';
+import { GenerationStatus } from './generation';
+import { useJob, useStartGeneration } from './useGeneration';
+import type { GenerationSummary } from './parts';
 
 /**
  * The brief editor, laid out like the NRC Connect "Create post" studio: four
@@ -51,7 +55,12 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   const qc = useQueryClient();
   const ed = useDraftEditor({ initial, readOnly });
   const creative = ed.base?.creative;
-  const asset = useAsset(creative?.asset_id);
+  const generation = useStartGeneration();
+  const jobQuery = useJob(creative ? generation.jobId : null);
+  const job = jobQuery.data && jobQuery.data.creative_id === creative?.id ? jobQuery.data : undefined;
+  // The image of a finished job for this draft, else the one the draft already links to.
+  const asset = useAsset((job?.state === 'SUCCEEDED' ? job.result_asset_id : null) ?? creative?.asset_id);
+  const jobBusy = !!job && (!isJobTerminal(job.state) || isJobOutcomeUnknown(job.state));
 
   const firstFormat = context.post_formats[0];
   const [setup, setSetup] = useState<DraftSetup>(() => creative
@@ -180,7 +189,10 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
         </Step>
 
         <Step n={4} title="Image">
-          <Text type="body" color="secondary">The image is generated from the brief after the brief passes validation. Generation is added in the next step of this build.</Text>
+          {creative
+            ? <GenerationStatus version={creative.version} job={generation.jobId ? jobQuery : null} asset={asset}
+                problem={generation.problem} starting={generation.starting} onRetry={() => void generation.start(creative)} />
+            : <Text type="body" color="secondary">The image is made from the brief once the draft is created and passes validation.</Text>}
         </Step>
 
         {!disabled && (
@@ -216,7 +228,12 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           <ReadinessCard creative={creative} editing={ed.dirty || ed.state.kind === 'saving'}
             validate={can('validation:run') && !disabled && ed.state.kind === 'saved'
               ? { onClick: () => void validation.start(creative), busy: validation.starting }
-              : undefined} />
+              : undefined}
+            generation={generationSummary(job, {
+              allowed: can('generation:run') && !disabled && ed.state.kind === 'saved' && !jobBusy,
+              onClick: () => void generation.start(creative),
+              busy: generation.starting,
+            })} />
         )}
         {creative && (
           <VersionHistory creative={creative} current={ed.text} readOnly={disabled || ed.state.kind === 'conflict'}
@@ -234,6 +251,10 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
             <CardBody>
               <Button variant="ghost" size="sm" onClick={() => void simulate(`/__sim/creatives/${creative.id}/concurrent-edit`, 'A colleague saved a newer version')}>Someone else saves a newer version</Button>
               <Button variant="ghost" size="sm" onClick={() => void simulate('/__sim/fail-next-save', 'The next save will fail')}>Make the next save fail</Button>
+              <Button variant="ghost" size="sm" onClick={() => void simulate('/__sim/next-generation/rejected', 'The next image will be refused')}>Image service refuses the next image</Button>
+              <Button variant="ghost" size="sm" onClick={() => void simulate('/__sim/next-generation/unknown', 'The next image will stay unconfirmed')}>Next image stays unconfirmed</Button>
+              <Button variant="ghost" size="sm" onClick={() => void simulate('/__sim/next-generation/limit', 'The next Generate hits the daily limit')}>Next Generate hits the daily limit</Button>
+              <Button variant="ghost" size="sm" onClick={() => void simulate('/__sim/next-generation/lost', 'The answer to the next Generate will be lost')}>Lose the answer to the next Generate</Button>
             </CardBody>
           </Card>
         )}
@@ -251,4 +272,22 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
         message={creative ? 'Your latest changes are not saved yet. If you leave now they are lost.' : 'This brief is not saved. Create the draft first, or your text is lost.'} />
     </TwoColumn>
   );
+}
+
+/** Generation row of the readiness card, from the job this page follows. */
+function generationSummary(
+  job: { state: string; creative_version: number } | undefined,
+  start: { allowed: boolean; onClick: () => void; busy: boolean },
+): GenerationSummary {
+  const go = start.allowed ? { onClick: start.onClick, busy: start.busy } : undefined;
+  if (!job) return { variant: 'neutral', text: 'No image yet', start: go };
+  const v = `For version ${job.creative_version}.`;
+  switch (job.state) {
+    case 'SUCCEEDED': return { variant: 'done', text: 'Image saved', note: `${v} Final validation still needed.`, start: go };
+    case 'FAILED': return { variant: 'blocked', text: 'Not made', note: v, start: go };
+    case 'CANCELLED': return { variant: 'neutral', text: 'Cancelled', note: v, start: go };
+    case 'UNKNOWN':
+    case 'NEEDS_REVIEW': return { variant: 'waiting', text: 'Being confirmed', note: 'Generating again is off until this is settled.' };
+    default: return { variant: 'brand', text: 'In progress', note: `An image is being made for version ${job.creative_version}.` };
+  }
 }
