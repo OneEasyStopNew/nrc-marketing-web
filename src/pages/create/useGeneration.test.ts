@@ -28,6 +28,6 @@ describe('startProblem', () => {
   });
 
   it('names the eligibility reason', () => {
-    expect(startProblem(err(409, 'GENERATION_NOT_ELIGIBLE', { reason: 'STUDY_NOT_RECRUITING' })).title).toMatch(/recruiting/);
+    expect(startProblem(err(409, 'GENERATION_NOT_ELIGIBLE', { reason: 'STUDY_CLOSED' })).title).toMatch(/recruiting/);
   });
 });

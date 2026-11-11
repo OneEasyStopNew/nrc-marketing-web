@@ -130,7 +130,10 @@ export function startProblem(e: ApiError): StartProblem {
 
 function notEligible(reason: string | undefined): { title: string; detail: string } {
   switch (reason) {
-    case 'STUDY_NOT_RECRUITING': return { title: 'The study is no longer recruiting', detail: 'Posts can only be generated for a recruiting study.' };
+    case 'STUDY_CLOSED': return { title: 'The study is no longer recruiting', detail: 'Posts can only be generated for a recruiting study.' };
+    case 'STALE_VERSION': return { title: 'The draft changed', detail: 'A newer version exists. Reload the draft, validate the latest version, then generate.' };
+    case 'NOT_VALIDATED': return { title: 'This version has not passed validation', detail: 'Validate this version. Generation starts only after the assessed checks pass.' };
+    case 'NO_ACTIVE_POLICY': return { title: 'No active rulebook for this study', detail: 'Generation needs an active policy to check against. Ask a policy administrator.' };
     case 'LANGUAGE_NOT_ALLOWED': return { title: 'This language is not approved for the study', detail: 'Create the draft in a language the study allows.' };
     case 'FORMAT_NOT_ALLOWED': return { title: 'This post format cannot be generated', detail: 'Create the draft with a supported format.' };
     default: return { title: 'This draft cannot be generated', detail: 'Check the study and the draft settings, then try again.' };

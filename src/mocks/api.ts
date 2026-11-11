@@ -258,7 +258,7 @@ const ROUTES: Record<string, Handler> = {
     }
     const study = (req.data.STUDIES[c.tenant_id] ?? []).find((st) => st.study_id === c.study_id);
     if (study?.recruitment_status !== 'recruiting') {
-      return problem(409, 'GENERATION_NOT_ELIGIBLE', 'This draft cannot be generated.', false, { reason: 'STUDY_NOT_RECRUITING' });
+      return problem(409, 'GENERATION_NOT_ELIGIBLE', 'This draft cannot be generated.', false, { reason: 'STUDY_CLOSED' });
     }
     // The validation gate (NRC-7): only a version whose current run passed.
     const latest = runsFor(req, c)[0];
