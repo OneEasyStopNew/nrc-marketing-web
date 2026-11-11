@@ -25,6 +25,19 @@ import { fmtDateTime } from '@/lib/utils';
 import { useRules, useWorkspaceMutation } from '@/pages/shared/queries';
 import { GATE_LABEL, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
 
+// Demo decision (NRC-20, 13 Nov): the backend has no rule-writing endpoints yet, so edit controls stay visible but only explain that.
+// Set to true to bring back the editor, drafts and activate/retire confirmations unchanged.
+const RULE_EDITING_AVAILABLE = false;
+
+/** Runs a rule-writing action when editing is available; otherwise says why nothing opens. No API call is made. */
+function useRuleEditing() {
+  const { toast } = useToast();
+  return (open: () => void) => {
+    if (RULE_EDITING_AVAILABLE) open();
+    else toast('Rule editing is not available yet', 'info', 'Editing, activating and retiring rules is being built in the backend. The rules shown are read-only for now.');
+  };
+}
+
 const GATES: RuleGate[] = ['completeness', 'study_facts', 'policy', 'media'];
 const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
   { value: 'brief', label: 'Brief' }, { value: 'caption', label: 'Caption' }, { value: 'image', label: 'Image' }, { value: 'video', label: 'Video' },
@@ -52,11 +65,12 @@ export default function RulesPage() {
   }, [all, status, gate, search]);
   const open = all.find((r) => r.rule_id === openId);
   const manage = can('policy:manage');
+  const whenEditable = useRuleEditing();
 
   return (
     <VStack gap={8}>
       <PageHeader title="Rules" description="The rules every brief, caption and image is checked against, and the clause each one comes from."
-        actions={manage ? <Button variant="primary" icon="plus" onClick={() => setEditing('new')}>New rule</Button> : undefined} />
+        actions={manage ? <Button variant="primary" icon="plus" onClick={() => whenEditable(() => setEditing('new'))}>New rule</Button> : undefined} />
       <VStack gap={4}>
         <Tabs<RuleStatus> value={status} onChange={setStatus} tabs={[
           { id: 'ACTIVE', label: 'Active', count: count('ACTIVE') },
@@ -77,7 +91,7 @@ export default function RulesPage() {
             : <EmptyState icon="doc" title="No rules match" description={search || gate !== 'any' ? 'Try another search or check area.' : undefined} />}
         </QueryState>
       </VStack>
-      {open && <RuleDrawer rule={open} manage={manage} onClose={() => setOpenId(null)} onEdit={() => setEditing(open)} />}
+      {open && <RuleDrawer rule={open} manage={manage} onClose={() => setOpenId(null)} onEdit={() => whenEditable(() => setEditing(open))} />}
       {editing && <RuleDialog rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </VStack>
   );
@@ -104,6 +118,7 @@ function ruleColumns(onOpen: (r: PolicyRule) => void): TableColumn<PolicyRule>[]
 function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; manage: boolean; onClose: () => void; onEdit: () => void }) {
   const { toast } = useToast();
   const [confirm, setConfirm] = useState<RuleStatus | null>(null);
+  const whenEditable = useRuleEditing();
   const change = useWorkspaceMutation((id: string, version: number, s: RuleStatus) => workspaceApi.updateRule(id, version, { status: s }), ['rules']);
   const setStatus = async (s: RuleStatus) => {
     try {
@@ -120,8 +135,8 @@ function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; ma
       footer={manage ? (
         <>
           {r.status !== 'RETIRED' && <Button variant="secondary" icon="edit" onClick={onEdit}>Edit</Button>}
-          {r.status === 'DRAFT' && <Button variant="primary" onClick={() => setConfirm('ACTIVE')}>Activate</Button>}
-          {r.status === 'ACTIVE' && <Button variant="danger-outline" onClick={() => setConfirm('RETIRED')}>Retire</Button>}
+          {r.status === 'DRAFT' && <Button variant="primary" onClick={() => whenEditable(() => setConfirm('ACTIVE'))}>Activate</Button>}
+          {r.status === 'ACTIVE' && <Button variant="danger-outline" onClick={() => whenEditable(() => setConfirm('RETIRED'))}>Retire</Button>}
         </>
       ) : undefined}>
       <VStack gap={5}>

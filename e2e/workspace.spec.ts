@@ -101,26 +101,47 @@ test('a publisher queues an approved post; it is never shown as published', asyn
   await expect(seen(page, 'Queued').first()).toBeVisible();
 });
 
-test('a policy administrator drafts a rule with its source, then activates it', async ({ page }) => {
+// Demo decision (NRC-20, 13 Nov): rule editing is switched off (RULE_EDITING_AVAILABLE in RulesPage.tsx)
+// because the backend has no rule-writing endpoints yet. The controls stay where they are and explain
+// that instead of opening the editor or a confirmation. The editor's own flow (validation messages,
+// draft, activate) is not reachable until the flag is turned back on; restore that test then.
+test('rule editing controls stay visible but only explain that editing is not available yet', async ({ page }) => {
   // Rule administration is parked under /manage while the Rules section shows the read-only active policy (NRC-20).
   await signInAt(page, '/marketing/rules/manage', 'policy-admin');
+  const notYet = async () => {
+    await expect(seen(page, 'Rule editing is not available yet').first()).toBeVisible();
+    await expect(page.getByRole('dialog', { name: /New rule|^Edit / })).toHaveCount(0);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    // Dismiss it, so the next control is shown to raise its own.
+    await page.getByRole('region', { name: 'Notifications' }).getByRole('button', { name: 'Dismiss notification' }).click();
+    await expect(seen(page, 'Rule editing is not available yet')).toHaveCount(0);
+  };
+  const draftsTab = page.getByRole('tab', { name: /Drafts/ });
+  await expect(draftsTab).toContainText('1');
+
   await page.getByRole('button', { name: 'New rule' }).click();
-  const dialog = page.getByRole('dialog', { name: 'New rule' });
-  await dialog.getByRole('button', { name: 'Save draft' }).click();
-  await expect(seen(page, 'Give the rule a short title.')).toBeVisible();
-  await expect(seen(page, 'Cite the clause this rule comes from.')).toBeVisible();
+  await notYet();
 
-  await dialog.getByRole('textbox', { name: /^Title/ }).fill('Placeholder rule for the test');
-  await dialog.getByRole('textbox', { name: /^What it checks/ }).fill('Placeholder description (simulation).');
-  await dialog.getByRole('textbox', { name: /^Clause/ }).first().fill('Sim 9.9');
-  await dialog.getByRole('button', { name: 'Save draft' }).click();
-  await expect(seen(page, /drafted$/)).toBeVisible();
+  // Active rule: Edit and Retire.
+  await page.getByRole('button', { name: 'No promised results' }).click();
+  const drawer = page.getByRole('dialog', { name: 'No promised results' });
+  await drawer.getByRole('button', { name: 'Edit' }).click();
+  await notYet();
+  await drawer.getByRole('button', { name: 'Retire' }).click();
+  await notYet();
+  await page.keyboard.press('Escape');
 
-  await page.getByRole('tab', { name: /Drafts/ }).click();
-  await page.getByRole('button', { name: 'Placeholder rule for the test' }).click();
-  await page.getByRole('button', { name: 'Activate' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: /Activate/ }).click();
-  await expect(seen(page, /is now active$/)).toBeVisible();
+  // Draft rule: Activate. Drafts stay viewable, read-only.
+  await draftsTab.click();
+  await page.getByRole('button', { name: 'Image rights are on file' }).click();
+  await page.getByRole('dialog', { name: 'Image rights are on file' }).getByRole('button', { name: 'Activate' }).click();
+  await notYet();
+  await page.keyboard.press('Escape');
+
+  // Nothing was written: still one draft, and the active rule is unchanged.
+  await expect(draftsTab).toContainText('1');
+  await page.getByRole('tab', { name: /Active/ }).click();
+  await expect(page.getByRole('button', { name: 'No promised results' })).toBeVisible();
 });
 
 test('an administrator invites someone and changes roles; a role is always required', async ({ page }) => {

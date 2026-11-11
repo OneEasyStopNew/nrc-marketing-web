@@ -61,10 +61,11 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
   } },
   { name: 'accounts', open: (page) => signInAt(page, '/marketing/integrations', 'publisher') },
   { name: 'team', open: (page) => signInAt(page, '/marketing/team', 'admin') },
-  { name: 'rule-new', open: async (page) => {
+  // Rule editing is off for the demo (NRC-20): "New rule" shows a message instead of the editor dialog.
+  { name: 'rule-new-not-available', open: async (page) => {
     await signInAt(page, '/marketing/rules/manage', 'policy-admin');
     await page.getByRole('button', { name: 'New rule' }).click();
-    await page.getByRole('dialog').waitFor();
+    await seen(page, 'Rule editing is not available yet').waitFor();
     await page.waitForTimeout(400);
   } },
   { name: 'rules-active-policy', open: (page) => signInAt(page, '/marketing/rules', 'creator') },
