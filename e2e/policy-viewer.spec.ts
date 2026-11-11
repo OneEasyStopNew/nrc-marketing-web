@@ -64,6 +64,19 @@ test('the viewer is read-only: no edit, upload or activate controls', async ({ p
   }
 });
 
+test('only a policy administrator gets the Manage rules link, and editing there is not available yet', async ({ page }) => {
+  await signInAt(page, '/marketing/rules', 'creator');
+  await expect(ruleCard(page, 'REC-01')).toBeVisible();
+  await expect(page.getByRole('main').getByRole('link', { name: 'Manage rules' })).toHaveCount(0);
+
+  await signInAt(page, '/marketing/rules', 'policy-admin');
+  await page.getByRole('main').getByRole('link', { name: 'Manage rules' }).click();
+  await expect(page).toHaveURL(/\/marketing\/rules\/manage$/);
+  await page.getByRole('button', { name: /new rule/i }).click();
+  await expect(seen(page, 'Rule editing is not available yet')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('no active policy shows "Policy setup required", never a clean result', async ({ page }) => {
   await signInAt(page, '/marketing/rules', 'creator-no-studies');
   await expect(h1(page)).toHaveText('Rules');

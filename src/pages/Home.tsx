@@ -13,6 +13,7 @@ import type { ActivityItem, ApprovalRequest, DraftSummary, Publication, SocialAc
 import { Button } from '@/components/ui/Button';
 import { EmptyState, PageHeader } from '@/components/ui/Misc';
 import { ROLE_LABELS } from '@/components/layout/AppLayout';
+import { RULE_ADMIN_PATH } from '@/pages/rules/activePolicy';
 import {
   useAccounts, useActivity, useApprovals, useDrafts, useMembers, usePublications, useRules,
 } from './shared/queries';
@@ -181,7 +182,7 @@ function PolicyDashboard() {
   return (
     <VStack gap={6}>
       <SectionTitle title="Policy rules" description="The rules every brief, caption and image is checked against."
-        actions={<Button variant="secondary" href="/marketing/rules">Manage rules</Button>} />
+        actions={<Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button>} />
       <QueryState query={rules} what="the policy rules">
         {(all) => {
           const active = all.filter((r) => r.status === 'ACTIVE');

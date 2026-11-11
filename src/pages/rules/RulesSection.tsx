@@ -13,8 +13,9 @@ const RulesPage = lazy(() => import('./RulesPage'));
  *
  * The rule administration page (RulesPage: draft, edit, activate) depends on
  * the proposed /rules endpoints, which the backend does not provide yet. It is
- * kept unchanged under /marketing/rules/manage for policy administrators, with
- * no link from the menu or the viewer, until rule administration is built.
+ * kept under /marketing/rules/manage for policy administrators only (linked
+ * from the viewer and the administrator's home page when they hold
+ * policy:manage); its editing controls show "not available yet" for the demo.
  */
 export default function RulesSection() {
   const { can } = useAuth();

@@ -26,3 +26,6 @@ export const isFiltered = (f: PolicyFilter) => f.severity !== 'any' || f.mandato
 /** Unknown inputs from a newer backend show as sent rather than disappearing. */
 export const inputsLabel = (inputs: readonly string[]) =>
   inputs.map((i) => INPUT_LABEL[i as PolicyInput] ?? i).join(', ');
+
+// Rule administration is for policy administrators only (policy:manage), in the demo and after it.
+export const RULE_ADMIN_PATH = '/marketing/rules/manage';

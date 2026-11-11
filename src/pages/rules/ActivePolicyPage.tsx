@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAuth } from '@/auth/AuthProvider';
 import { Blockquote } from '@astryxdesign/core/Blockquote';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
@@ -15,7 +16,7 @@ import { Alert, EmptyState, PageHeader, SkeletonRows } from '@/components/ui/Mis
 import { fmtDateTime } from '@/lib/utils';
 import { useActivePolicy } from '@/pages/shared/queries';
 import { GATE_LABEL, QueryState, SectionTitle, SeverityBadge } from '@/pages/shared/ui';
-import { filterRules, inputsLabel, isFiltered, NO_FILTER, type PolicyFilter } from './activePolicy';
+import { filterRules, inputsLabel, isFiltered, NO_FILTER, RULE_ADMIN_PATH, type PolicyFilter } from './activePolicy';
 
 /**
  * Rules (NRC-20 demo slice): the tenant's active policy, read-only. Shows the
@@ -25,10 +26,12 @@ import { filterRules, inputsLabel, isFiltered, NO_FILTER, type PolicyFilter } fr
  */
 export default function ActivePolicyPage() {
   const policy = useActivePolicy();
+  const { can } = useAuth();
 
   return (
     <VStack gap={8}>
-      <PageHeader title="Rules" description="The active policy that every brief, caption and image is checked against. Read-only." />
+      <PageHeader title="Rules" description="The active policy that every brief, caption and image is checked against. Read-only."
+        actions={can('policy:manage') ? <Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button> : undefined} />
       {policy.isPending ? <Loading />
         : policy.isError && isNoActivePolicy(policy.error) ? <SetupRequired />
           : (
