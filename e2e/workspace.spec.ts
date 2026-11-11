@@ -151,6 +151,28 @@ test('pages outside the role are refused, not hidden behind a blank screen', asy
   await expect(seen(page, 'Not available with your role')).toBeVisible();
 });
 
+// Demo decision (NRC-18, 11 Nov 2026): media upload and removal are not built in the backend yet. The controls stay
+// visible and say so (MEDIA_WRITES_AVAILABLE in MediaPage.tsx); no dialog opens and nothing is sent.
+test('media upload and removal say they are not available yet and open nothing', async ({ page }) => {
+  await signInAt(page, '/marketing/media', 'creator');
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(seen(page, 'Uploading is not available yet')).toBeVisible();
+  await expect(seen(page, 'Uploading images and videos is being built in the backend. Generated images appear here once they are made.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // The toast can sit over the grid; open the file from the keyboard.
+  await page.getByRole('button', { name: /^sim-waiting-room\.png/ }).press('Enter');
+  const drawer = page.getByRole('dialog');
+  await expect(drawer).toHaveCount(1);
+  await drawer.getByRole('button', { name: 'Remove from library' }).click();
+  await expect(seen(page, 'Removing media is not available yet')).toBeVisible();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  // The file is still in the library.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /^sim-waiting-room\.png/ })).toBeVisible();
+});
+
 test('media and connected accounts show their fixtures and what needs fixing', async ({ page }) => {
   await signInAt(page, '/marketing/media', 'creator');
   await expect(h1(page)).toHaveText('Media');

@@ -37,6 +37,11 @@ import { Timestamp } from '@astryxdesign/core/Timestamp';
 type Kind = 'all' | 'image' | 'video';
 type Layout = 'grid' | 'table';
 
+// Demo decision (NRC-18, 11 Nov 2026): media upload and removal are not built in the backend yet, so the controls explain that instead of calling the API.
+const MEDIA_WRITES_AVAILABLE = false;
+const UPLOAD_NOT_AVAILABLE = ['Uploading is not available yet', 'Uploading images and videos is being built in the backend. Generated images appear here once they are made.'] as const;
+const REMOVE_NOT_AVAILABLE = ['Removing media is not available yet', 'Removing files from the library is being built in the backend. Nothing was removed.'] as const;
+
 /**
  * Media library (NRC-18): images and videos Marketing may use, with where
  * each came from, its licence and consent. Blocked or expired files cannot be
@@ -45,6 +50,7 @@ type Layout = 'grid' | 'table';
 export default function MediaPage() {
   const sim = useIsSimulation();
   const { can } = useAuth();
+  const { toast } = useToast();
   const media = useMedia();
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<Kind>('all');
@@ -65,7 +71,7 @@ export default function MediaPage() {
   return (
     <VStack gap={8}>
       <PageHeader title="Media" description="Images and videos you may use, with their source, licence and consent."
-        actions={can('creative:write') ? <Button variant="primary" icon="up" onClick={() => setUploading(true)}>Upload</Button> : undefined} />
+        actions={can('creative:write') ? <Button variant="primary" icon="up" onClick={() => (MEDIA_WRITES_AVAILABLE ? setUploading(true) : toast(UPLOAD_NOT_AVAILABLE[0], 'info', UPLOAD_NOT_AVAILABLE[1]))}>Upload</Button> : undefined} />
 
       <VStack gap={4}>
         <HStack gap={3} vAlign="center" wrap="wrap">
@@ -148,7 +154,7 @@ function MediaDrawer({ m, onClose }: { m: MediaAsset; onClose: () => void }) {
   const archive = useWorkspaceMutation((id: string) => workspaceApi.archiveMedia(id), ['media']);
   return (
     <Drawer open onClose={onClose} title={m.name} subtitle={`${m.kind === 'video' ? 'Video' : 'Image'} · ${m.width_px}×${m.height_px} · ${fmtBytes(m.size_bytes)}`} badge={<MediaBadge value={m.status} />}
-      footer={can('creative:write') ? <Button variant="danger-outline" onClick={() => setConfirm(true)}>Remove from library</Button> : undefined}>
+      footer={can('creative:write') ? <Button variant="danger-outline" onClick={() => (MEDIA_WRITES_AVAILABLE ? setConfirm(true) : toast(REMOVE_NOT_AVAILABLE[0], 'info', REMOVE_NOT_AVAILABLE[1]))}>Remove from library</Button> : undefined}>
       <VStack gap={5}>
         {m.status_reason && <Alert tone={m.status === 'BLOCKED' ? 'blocked' : m.status === 'EXPIRED' ? 'waiting' : 'info'} title={m.status_reason} />}
         {m.preview_url

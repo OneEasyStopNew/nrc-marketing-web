@@ -36,10 +36,12 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
   { name: 'home-creator', open: (page) => signInAt(page, '/marketing', 'creator') },
   { name: 'home-publisher', open: (page) => signInAt(page, '/marketing', 'publisher') },
   { name: 'media', open: (page) => signInAt(page, '/marketing/media', 'creator') },
+  // Demo decision (NRC-18, 11 Nov 2026): Upload shows "not available yet" instead of the Upload dialog
+  // (MEDIA_WRITES_AVAILABLE in MediaPage.tsx). Audit that message; audit the dialog again when uploads are switched back on.
   { name: 'media-upload', open: async (page) => {
     await signInAt(page, '/marketing/media', 'creator');
     await page.getByRole('button', { name: 'Upload' }).click();
-    await page.getByRole('dialog').waitFor();
+    await seen(page, 'Uploading is not available yet').waitFor();
     await page.waitForTimeout(400);
   } },
   { name: 'approvals', open: async (page) => {
