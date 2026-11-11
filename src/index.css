@@ -1,0 +1,18 @@
+/* Styling comes from Astryx: its reset, component styles and the neutral theme.
+   The app adds no layout or component CSS of its own. */
+@layer reset, astryx-base, astryx-theme;
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
+
+html { -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--color-background-body); color: var(--color-text-primary); }
+
+/* The only app-specific marks, for which Astryx has no component: words a
+   validation finding points at, and words added or removed between versions.
+   Colours are Astryx theme tokens. */
+.mark-block { background: var(--color-error-muted); color: var(--color-on-error-muted); border-bottom: 2px solid var(--color-error); border-radius: var(--radius-inner); padding: 0 2px; }
+.mark-warn { background: var(--color-warning-muted); color: var(--color-on-warning-muted); border-bottom: 2px solid var(--color-warning); border-radius: var(--radius-inner); padding: 0 2px; }
+.mark-selected { outline: 2px solid var(--color-text-primary); outline-offset: 2px; }
+.diff-del { background: var(--color-error-muted); color: var(--color-on-error-muted); text-decoration: line-through; border-radius: var(--radius-inner); padding: 0 2px; }
+.diff-ins { background: var(--color-success-muted); color: var(--color-on-success-muted); text-decoration: underline; border-radius: var(--radius-inner); padding: 0 2px; }
