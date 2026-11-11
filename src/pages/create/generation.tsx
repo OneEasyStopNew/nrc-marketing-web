@@ -3,12 +3,12 @@ import { HStack, VStack } from '@astryxdesign/core/Layout';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { shortHash, type Asset } from '@/api/assets';
 import { isApiError } from '@/api/errors';
-import { failureText, isJobOutcomeUnknown, JOB_STEPS, jobProgress, type Job } from '@/api/jobs';
+import { failureText, JOB_STEPS, jobProgress, unreachable, type Job } from '@/api/jobs';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Alert, ProgressBar, SkeletonRows } from '@/components/ui/Misc';
 import { fmtDateTime } from '@/lib/utils';
-import type { StartProblem } from './useGeneration';
+import { jobPollingExpired, type StartProblem } from './useGeneration';
 
 /** Name the backend gives simulated output; such an image is never live evidence. */
 export const SIMULATED_PROVIDER = 'simulation';
@@ -62,60 +62,88 @@ function JobState({ version, job, asset }: { version: number; job: UseQueryResul
   const p = jobProgress(j);
   const stale = j.creative_version !== version;
   const forVersion = <Text type="supporting" color="secondary">For version {j.creative_version}{stale && '. The brief has changed since; generate again after validating the new version.'}</Text>;
-
-  if (j.state === 'SUCCEEDED') {
-    const a = asset.data;
-    const simulated = a?.provider === SIMULATED_PROVIDER;
-    return (
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Badge variant="done">Image saved</Badge>
-          <Badge>Draft for review</Badge>
-          {simulated && <Badge variant="waiting">Simulation, not a real generated image</Badge>}
-        </HStack>
-        {forVersion}
-        {a && (
-          <Text type="supporting" color="secondary">
-            {a.provider ?? 'Unknown service'}{a.model && ` (${a.model})`} Â· {a.width_px}Ã—{a.height_px} Â· {fmtDateTime(a.created_at)} Â· reference {shortHash(a.checksum_sha256)}
-          </Text>
-        )}
-        {asset.isError && <Alert tone="waiting" title="The image could not be shown">It is saved. Reload the page to fetch a new link.</Alert>}
-        <Text type="body" color="secondary">The image still needs its final validation before review. Generating it does not approve or publish anything.</Text>
-      </VStack>
-    );
-  }
-
-  if (j.state === 'FAILED') {
-    return (
-      <VStack gap={2}>
-        <Alert tone="blocked" title="The image was not made">{failureText(j.failure_code)}</Alert>
-        {forVersion}
-      </VStack>
-    );
-  }
-
-  if (j.state === 'CANCELLED') {
-    return <Alert tone="waiting" title="This generation was cancelled">No image was saved. Generate again when the brief is ready.</Alert>;
-  }
-
-  if (isJobOutcomeUnknown(j.state)) {
-    return (
-      <VStack gap={2}>
-        <Alert tone="waiting" title="Confirming with the image service">
-          The image service did not confirm this request. It is being checked with the same request, so you are not charged twice.
-          Generating again is turned off until this is settled. If it stays like this, it goes to manual review.
-        </Alert>
-        {forVersion}
-      </VStack>
-    );
-  }
-
-  const step = p.step + 1;
-  return (
-    <VStack gap={2}>
-      <ProgressBar value={p.step} max={JOB_STEPS.length - 1} label={p.label} valueLabel={`Step ${step} of ${JOB_STEPS.length}`} ariaLabel="Image generation progress" />
-      {forVersion}
-      <Text type="supporting" color="secondary">You can leave this page. The image keeps being made, and this link brings you back to it.</Text>
-    </VStack>
+  // Automatic checking has a time limit; past it, the user checks on demand.
+  const checkAgain = jobPollingExpired(j, job.dataUpdatedAt) && (
+    <Alert tone="waiting" title="Automatic checking has stopped"
+      action={<Button variant="secondary" size="sm" icon="refresh" loading={job.isFetching} onClick={() => void job.refetch()}>Check again</Button>}>
+      This generation has taken longer than expected. The page no longer checks it by itself. Checking again does not start a new image.
+    </Alert>
   );
+
+  switch (j.state) {
+    case 'SUCCEEDED': {
+      const a = asset.data;
+      const simulated = a?.provider === SIMULATED_PROVIDER;
+      return (
+        <VStack gap={2}>
+          <HStack gap={2} vAlign="center" wrap="wrap">
+            <Badge variant="done">Image saved</Badge>
+            <Badge>Draft for review</Badge>
+            {simulated && <Badge variant="waiting">Simulation, not a real generated image</Badge>}
+          </HStack>
+          {forVersion}
+          {a && (
+            <Text type="supporting" color="secondary">
+              {a.provider ?? 'Unknown service'}{a.model && ` (${a.model})`} · {a.width_px}×{a.height_px} · {fmtDateTime(a.created_at)} · reference {shortHash(a.checksum_sha256)}
+            </Text>
+          )}
+          {asset.isError && <Alert tone="waiting" title="The image could not be shown">It is saved. Reload the page to fetch a new link.</Alert>}
+          <Text type="body" color="secondary">The image still needs its final validation before review. Generating it does not approve or publish anything.</Text>
+        </VStack>
+      );
+    }
+    case 'FAILED':
+      return (
+        <VStack gap={2}>
+          <Alert tone="blocked" title="The image was not made">{failureText(j.failure_code)}</Alert>
+          {forVersion}
+        </VStack>
+      );
+    case 'CANCELLED':
+      return <Alert tone="waiting" title="This generation was cancelled">No image was saved. Generate again when the brief is ready.</Alert>;
+    case 'CANCEL_REQUESTED':
+      return (
+        <VStack gap={2}>
+          <Alert tone="waiting" title="Stopping this generation">
+            The generation is being stopped. Generating again is turned off until it has stopped.
+          </Alert>
+          {forVersion}
+          {checkAgain}
+        </VStack>
+      );
+    case 'UNKNOWN':
+      return (
+        <VStack gap={2}>
+          <Alert tone="waiting" title="Confirming with the image service">
+            The image service did not confirm this request. It is being checked with the same request, so you are not charged twice.
+            Generating again is turned off until this is settled.
+          </Alert>
+          {forVersion}
+          {checkAgain}
+        </VStack>
+      );
+    case 'NEEDS_REVIEW':
+      return (
+        <VStack gap={2}>
+          <Alert tone="waiting" title="A person is reviewing this generation">
+            The image service&apos;s answer could not be settled automatically, so a person is checking it. Nothing more happens automatically.
+            Generating again is turned off until the review is finished.
+          </Alert>
+          {forVersion}
+          {checkAgain}
+        </VStack>
+      );
+    case 'QUEUED':
+    case 'RUNNING':
+    case 'WAITING_PROVIDER':
+      return (
+        <VStack gap={2}>
+          <ProgressBar value={p.step} max={JOB_STEPS.length - 1} label={p.label} valueLabel={`Step ${p.step + 1} of ${JOB_STEPS.length}`} ariaLabel="Image generation progress" />
+          {forVersion}
+          {checkAgain || <Text type="supporting" color="secondary">You can leave this page. The image keeps being made, and this link brings you back to it.</Text>}
+        </VStack>
+      );
+    default:
+      return unreachable(j.state);
+  }
 }

@@ -1,6 +1,7 @@
 import type { Capability, Language, PostFormat, StudySnapshot, TenantMembership } from '@/api/session';
 import type { components } from '@/api/schema';
 import type { Creative } from '@/api/creatives';
+import type { JobStage } from '@/api/jobs';
 import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount } from '@/api/workspace';
 
 /**
@@ -85,11 +86,14 @@ export interface MockJob {
   started_ms: number;
   /** How the simulated provider answers: makes the image, refuses it, or never confirms. */
   outcome: 'image' | 'rejected' | 'unknown';
-  /** The job as it reads once finished. */
-  final: components['schemas']['JobRead'];
+  /** The job as it reads once finished, with `stage` limited to the backend's JobStage values. */
+  final: MockJobRead;
   /** The stored image, served only once the job has SUCCEEDED. */
   asset: MockAsset | null;
 }
+
+/** JobRead whose stage the fake API can only set to a real JobStage. */
+export type MockJobRead = Omit<components['schemas']['JobRead'], 'stage'> & { stage: JobStage | null };
 
 /** What data.ts must export. Later tickets add their collections here. */
 export interface MockData {

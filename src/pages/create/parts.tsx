@@ -170,11 +170,6 @@ export function SaveStatus({ state, version }: { state: SaveState; version?: num
 
 /* ---------- Validation and generation readiness ---------- */
 
-/**
- * What the backend says about the current version (CreativeRead.validation_runs).
- * Local edits make the last result out of date immediately. Generation
- * eligibility is not in the contract yet, so the UI never offers Generate.
- */
 /** What the readiness card shows about generation. */
 export interface GenerationSummary {
   variant: 'neutral' | 'done' | 'blocked' | 'waiting' | 'brand';
@@ -184,6 +179,12 @@ export interface GenerationSummary {
   start?: { onClick: () => void; busy: boolean };
 }
 
+/**
+ * What the backend says about the current version (CreativeRead.validation_runs).
+ * Local edits make the last result out of date immediately. Generate is
+ * offered for the saved version whose current run passed, when no job for this
+ * draft is still running or unsettled; the backend checks eligibility again.
+ */
 export function ReadinessCard({ creative, editing, validate, generation }: {
   creative: Creative;
   editing: boolean;
@@ -209,7 +210,6 @@ export function ReadinessCard({ creative, editing, validate, generation }: {
 
   // Generate only for the saved version whose current run passed; the backend checks again.
   const passed = !!current && current.state === 'SUCCEEDED' && current.outcome === 'PASS';
-  const canGenerate = !!generation.start && !editing && passed;
   const generateNext = passed && !editing && !!generation.start;
   const generateHint = !generation.start
     ? generation.note ?? 'Generation is not available for your role or this draft right now.'
@@ -231,7 +231,7 @@ export function ReadinessCard({ creative, editing, validate, generation }: {
           <Button variant={generateNext ? 'secondary' : 'primary'} icon="shield" disabled={!validate || editing || inProgress} loading={validate?.busy} onClick={validate?.onClick}>
             Validate version {creative.version}
           </Button>
-          <Button variant={generateNext ? 'primary' : 'secondary'} icon="img" disabled={!canGenerate} loading={generation.start?.busy} onClick={generation.start?.onClick}>
+          <Button variant={generateNext ? 'primary' : 'secondary'} icon="img" disabled={!generateNext} loading={generation.start?.busy} onClick={generation.start?.onClick}>
             Generate image
           </Button>
         </HStack>

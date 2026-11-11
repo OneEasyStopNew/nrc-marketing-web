@@ -2,8 +2,8 @@ import { API_PREFIX } from '@/config/env';
 import { TENANT_HEADER } from '@/api/http';
 import type { Capability, ContextWire, MeWire } from '@/api/session';
 import { CAPTION_MAX, PROMPT_MAX, type Creative } from '@/api/creatives';
-import type { DummyUser, MockAsset, MockCreative, MockData, MockJob, MockValidationRun } from './types';
-import type { Job } from '@/api/jobs';
+import type { DummyUser, MockAsset, MockCreative, MockData, MockJob, MockJobRead, MockValidationRun } from './types';
+import { IMAGE_GENERATION, isJobTerminal, type JobKind } from '@/api/jobs';
 import type { ValidationRun as ValidationRunRead } from '@/api/validations';
 import { evaluate } from './validator';
 import { loadMockData, MOCK_DATA_PATH } from './load';
@@ -241,7 +241,7 @@ const ROUTES: Record<string, Handler> = {
     if (!key || !/^[A-Za-z0-9_-]{8,128}$/.test(key)) {
       return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key of 8 to 128 letters, digits, _ or -.', type: 'missing' }]);
     }
-    const body = req.body as { creative_id?: string; creative_version?: number; kind?: string };
+    const body = req.body as { creative_id?: string; creative_version?: number; kind?: JobKind };
     const payload = JSON.stringify(body);
     const earlier = mockServer.idempotency.get(`${req.tenantId}:job:${key}`);
     if (earlier) {
@@ -250,7 +250,7 @@ const ROUTES: Record<string, Handler> = {
       const prior = mockServer.jobs().get(earlier.id)!;
       return json(202, { job_id: prior.final.job_id, state: readJob(prior).state }, { Location: `${API_PREFIX}/jobs/${prior.final.job_id}` });
     }
-    if (body.kind !== 'image_generation') return fieldsProblem([{ loc: ['body', 'kind'], msg: "Input should be 'image_generation'", type: 'enum' }]);
+    if (body.kind !== IMAGE_GENERATION) return fieldsProblem([{ loc: ['body', 'kind'], msg: `Input should be '${IMAGE_GENERATION}'`, type: 'enum' }]);
     const c = store(req).get(body.creative_id ?? '');
     if (!c || c.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
     if (body.creative_version !== c.version) {
@@ -271,8 +271,8 @@ const ROUTES: Record<string, Handler> = {
     if (sim === 'limit') {
       return problem(429, 'GENERATION_LIMIT_REACHED', 'Your organisation has reached its image limit for today.', false, { reason: 'CREDIT_CEILING' });
     }
-    const active = [...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(readJob(j).state));
-    if (active.length >= 2) return problem(429, 'GENERATION_LIMIT_REACHED', 'Too many images are being made at once.', true, { reason: 'ACTIVE_JOB_LIMIT' });
+    const active = [...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && !isJobTerminal(readJob(j).state));
+    if (active.length >= ACTIVE_JOB_LIMIT) return problem(429, 'GENERATION_LIMIT_REACHED', 'Too many images are being made at once.', true, { reason: 'ACTIVE_JOB_LIMIT' });
 
     const id = `sim-gen-${crypto.randomUUID().slice(0, 8)}`;
     const outcome: MockJob['outcome'] = sim === 'rejected' ? 'rejected' : sim === 'unknown' ? 'unknown' : 'image';
@@ -281,7 +281,7 @@ const ROUTES: Record<string, Handler> = {
     const job: MockJob = {
       tenant_id: c.tenant_id, started_ms: Date.now(), outcome,
       final: {
-        job_id: id, kind: 'image_generation', creative_id: c.id, creative_version: c.version,
+        job_id: id, kind: IMAGE_GENERATION, creative_id: c.id, creative_version: c.version,
         state: outcome === 'image' ? 'SUCCEEDED' : outcome === 'rejected' ? 'FAILED' : 'UNKNOWN',
         stage: outcome === 'image' ? 'stored' : outcome === 'unknown' ? 'reconcile' : null,
         provider_request_id: `sim-request-${id.slice(8)}`,
@@ -719,13 +719,16 @@ function needCap({ user, tenantId }: MockRequest, cap: Capability) {
 
 /* ---------- Generation helpers ---------- */
 
+/** Generations one organisation may run at once; the backend's default generation_max_active_jobs_per_tenant. */
+const ACTIVE_JOB_LIMIT = 2;
+
 const JOB_QUEUED_MS = 800;
 const JOB_SUBMIT_MS = 1600;
 const JOB_PROVIDER_MS = 4000;
 const JOB_STORE_MS = 5000;
 
 /** The job as it reads now: queued, submitting, waiting on the provider, saving, then final. */
-function readJob(j: MockJob): Job {
+function readJob(j: MockJob): MockJobRead {
   const elapsed = Date.now() - j.started_ms;
   const at = (ms: number) => new Date(j.started_ms + ms).toISOString();
   const running = { ...j.final, failure_code: null, result_asset_id: null, completed_at: null };
