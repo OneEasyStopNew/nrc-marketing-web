@@ -8,7 +8,7 @@
  *
  * - loading:  the current link is being drawn
  * - shown:    the image loaded
- * - renewing: a fresh link is being fetched (the effect runs the refetch)
+ * - renewing: a fresh link is being fetched (the event handler runs the refetch)
  * - failed:   renewal did not help; show an error with "Try again"
  */
 export type RenewalPhase = 'loading' | 'shown' | 'renewing' | 'failed';

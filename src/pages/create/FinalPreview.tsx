@@ -8,7 +8,7 @@ import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth, useSession } from '@/auth/AuthProvider';
-import { assetDenied, assetsApi, manifestForDownload, useAsset } from '@/api/assets';
+import { assetDenied, assetKeys, assetsApi, manifestForDownload, useAsset } from '@/api/assets';
 import { creativesApi, currentValidation, latestValidation } from '@/api/creatives';
 import { http } from '@/api/http';
 import { isApiError } from '@/api/errors';
@@ -19,6 +19,8 @@ import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, SkeletonRows, TwoColumn } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
 import { AssetProvenance } from '@/components/media/GeneratedImagePreview';
+import { imageAltForBrief } from '@/components/media/imageAlt';
+import { runImageSimulation } from './imageSimulation';
 import { SIMULATION_BUILD } from '@/config/env';
 import { fmtDateTime } from '@/lib/utils';
 import { useValidationRun } from '@/pages/validation/useValidation';
@@ -99,10 +101,14 @@ export default function FinalPreview() {
   };
 
   // Simulation only: the fake API answers the next image request this way, then the image is asked for again.
-  const simulateImage = async (kind: string, done: string) => {
-    await http.post('/__sim/next-image-link', { mode: kind });
-    toast(done, 'waiting');
-    await qc.invalidateQueries({ queryKey: ['asset', context.tenant.tenant_id, creative.asset_id] });
+  const simulateImage = async (kind: string, done: string): Promise<void> => {
+    const assetId = creative.asset_id;
+    if (!assetId) return; // the tools render only when the draft has an image
+    await runImageSimulation({
+      setMode: async (mode) => { await http.post('/__sim/next-image-link', { mode }); },
+      refreshImage: () => qc.invalidateQueries({ queryKey: assetKeys.detail(context.tenant.tenant_id, assetId) }),
+      toast,
+    }, kind, done);
   };
 
   const validation: ReactNode = !latest
@@ -148,7 +154,7 @@ export default function FinalPreview() {
         <section aria-label="Post preview"><VStack gap={4}>
           {/* Provenance is in "What this preview is", so the image shows without its caption here. */}
           <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
-            image={creative.asset_id ? { assetId: creative.asset_id, alt: `Image for version ${creative.version} of this draft`, provenance: false } : undefined} />
+            image={creative.asset_id ? { assetId: creative.asset_id, alt: imageAltForBrief(creative.current_prompt), provenance: false } : undefined} />
         </VStack></section>
 
         <VStack gap={4}>

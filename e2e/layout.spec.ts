@@ -6,7 +6,8 @@ import { auditLayout, seen, settle, signInAt } from './helpers';
  * rules in helpers.ts) of every built screen, light at three widths and dark
  * at desktop.
  */
-const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
+// `fixme` names the switch that turned a screen off; the audit comes back when the switch is removed.
+const SCREENS: { name: string; open: (page: Page) => Promise<void>; fixme?: string }[] = [
   { name: 'sign-in', open: async (page) => { await page.goto('/marketing'); await settle(page); } },
   { name: 'session-expired-link', open: async (page) => { await page.goto('/auth/callback?code=sim&state=x'); await settle(page); } },
   { name: 'choose-organisation', open: async (page) => { await page.goto('/marketing'); await page.locator('li button', { hasText: 'Policy reviewer' }).click(); await settle(page); } },
@@ -44,6 +45,12 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
     await seen(page, 'Uploading is not available yet').waitFor();
     await page.waitForTimeout(400);
   } },
+  { name: 'media-upload-dialog', fixme: 'MEDIA_WRITES_AVAILABLE is false in MediaPage.tsx (demo, NRC-18): Upload opens no dialog', open: async (page) => {
+    await signInAt(page, '/marketing/media', 'creator');
+    await page.getByRole('button', { name: 'Upload' }).click();
+    await page.getByRole('dialog').waitFor();
+    await page.waitForTimeout(400);
+  } },
   { name: 'approvals', open: async (page) => {
     await signInAt(page, '/marketing/approvals', 'reviewer');
     await page.locator('li button', { hasText: 'NRC (simulation)' }).click();
@@ -79,6 +86,7 @@ for (const theme of ['light', 'dark'] as const) {
     for (const s of SCREENS) {
       test(s.name, async ({ page }, testInfo) => {
         test.skip(theme === 'dark' && testInfo.project.name !== 'desktop', 'dark mode is checked at desktop width');
+        test.fixme(s.fixme !== undefined, s.fixme);
         await page.addInitScript((t) => { try { localStorage.setItem('theme', t); } catch { /* opaque-origin frame */ } }, theme);
         await s.open(page);
         const r = await auditLayout(page, testInfo, `${s.name}-${theme}`);

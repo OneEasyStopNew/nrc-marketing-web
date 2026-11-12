@@ -37,7 +37,12 @@ import { Timestamp } from '@astryxdesign/core/Timestamp';
 type Kind = 'all' | 'image' | 'video';
 type Layout = 'grid' | 'table';
 
-// Demo decision (NRC-18, 11 Nov 2026): media upload and removal are not built in the backend yet, so the controls explain that instead of calling the API.
+// Demo switch (NRC-18, 11 Nov 2026). Owner: Firoz. Media upload and removal are not built in the backend
+// yet, so the controls explain that instead of calling the API.
+// Remove when the backend upload (NRC-3) and archive endpoints merge: delete this switch and the two
+// "not available" messages, let Upload and Remove open their dialogs again, delete the "not available
+// yet" test in e2e/workspace.spec.ts and the "media-upload" message audit in e2e/layout.spec.ts, and
+// drop the fixme on "media-upload-dialog" there.
 const MEDIA_WRITES_AVAILABLE = false;
 const UPLOAD_NOT_AVAILABLE = ['Uploading is not available yet', 'Uploading images and videos is being built in the backend. Generated images appear here once they are made.'] as const;
 const REMOVE_NOT_AVAILABLE = ['Removing media is not available yet', 'Removing files from the library is being built in the backend. Nothing was removed.'] as const;

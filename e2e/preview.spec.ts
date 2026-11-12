@@ -26,7 +26,7 @@ test('the final preview shows the exact version, what it was checked against, an
   await expect(page).toHaveURL(/\/marketing\/create\/sim-cr-0001\/preview$/);
   await expect(page.getByRole('heading', { name: 'Final preview' })).toBeVisible();
 
-  await expect(preview(page).getByRole('img', { name: /Image for version 3 of this draft \(simulation placeholder\)/ })).toBeVisible();
+  await expect(preview(page).getByRole('img', { name: /^Generated image for the brief: .+ \(simulation placeholder\)$/ })).toBeVisible();
   await expect(preview(page)).toContainText('[Required disclosure placeholder: this is a research study.]');
   await expect(seen(page, 'Not approved; not posted')).toBeVisible();
   await expect(seen(page, 'Passed the assessed checks')).toBeVisible();

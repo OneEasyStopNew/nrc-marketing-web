@@ -21,6 +21,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, Tabs } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
+import { imageAltForBrief } from '@/components/media/imageAlt';
 import { fmtDateTime } from '@/lib/utils';
 import { PostPreview } from '@/pages/create/parts';
 import { useApprovals, useWorkspaceMutation } from '@/pages/shared/queries';
@@ -176,7 +177,7 @@ function Review() {
       <Grid columns={{ minWidth: 340, repeat: 'fit' }} gap={6}>
         <section aria-label="Post preview"><VStack gap={4}>
           <PostPreview tenantName={context.tenant.name} caption={a.caption} format={format} full
-            image={assetId ? { assetId, alt: `Image for version ${a.creative_version}` } : undefined} />
+            image={assetId ? { assetId, alt: imageAltForBrief(a.prompt) } : undefined} />
           <Card>
             <CardHead title="Brief" />
             <Text type="body" wordBreak="break-word">{a.prompt}</Text>

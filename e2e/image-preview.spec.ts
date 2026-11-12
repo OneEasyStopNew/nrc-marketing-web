@@ -19,7 +19,13 @@ test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
 
 const SEEDED = '/marketing/create/sim-cr-0001';
 const preview = (page: Page) => page.getByRole('region', { name: 'Post preview' });
-const image = (page: Page) => preview(page).getByRole('img', { name: 'Image for version 3 of this draft (simulation placeholder)' });
+const ALT = /^Generated image for the brief: .+ \(simulation placeholder\)$/;
+const image = (page: Page) => preview(page).getByRole('img', { name: ALT });
+/** The preview's status region: mounted for the component's life, so screen readers announce each change. */
+const status = (page: Page) => preview(page).locator('[role="status"][data-image-status]');
+/** Visible text only: the status region repeats the notice titles for screen readers. */
+const shown = (page: Page, text: string | RegExp) =>
+  seen(page, text).and(page.locator(':not([role="status"]):not([role="status"] *)'));
 
 /** The image is on screen and the browser actually drew it. */
 async function expectDrawn(page: Page) {
@@ -40,7 +46,7 @@ test('the seeded draft shows its image with where it came from', async ({ page }
 
   // The composer shows the same image with its provenance under it.
   await page.getByRole('link', { name: 'Back to the draft' }).click();
-  await expect(page.getByRole('img', { name: 'Image for this draft (simulation placeholder)' })).toBeVisible();
+  await expect(page.getByRole('img', { name: ALT })).toBeVisible();
   await expect(seen(page, 'Simulation, not a real generated image')).toBeVisible();
   await expect(seen(page, /Checksum 515151515151/)).toBeVisible();
 });
@@ -51,7 +57,7 @@ test('the full-size image opens and closes from the keyboard', async ({ page }) 
   await preview(page).getByRole('button', { name: 'Open full size' }).focus();
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Image at full size' });
-  await expect(dialog.getByRole('img', { name: 'Image for version 3 of this draft (simulation placeholder)' })).toBeVisible();
+  await expect(dialog.getByRole('img', { name: ALT })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
@@ -62,27 +68,27 @@ test('an expired image link is renewed automatically', async ({ page }) => {
   await expect(seen(page, 'The image link expired')).toBeVisible();
   await expectDrawn(page);
   await expect(image(page)).toHaveAttribute('src', /^data:image\/svg\+xml/);
-  await expect(seen(page, 'The image could not be shown')).toHaveCount(0);
+  await expect(shown(page, 'The image could not be shown')).toHaveCount(0);
 });
 
 test('a renewed link that fails too shows an error with Try again, and Try again recovers', async ({ page }) => {
   await signInAt(page, `${SEEDED}/preview`, 'creator');
   await simulate(page, 'Expire the image link twice');
-  await expect(seen(page, 'The image could not be shown')).toBeVisible();
+  await expect(shown(page, 'The image could not be shown')).toBeVisible();
   await expect(image(page)).toHaveCount(0);
   // It does not keep retrying on its own.
   await page.waitForTimeout(1500);
-  await expect(seen(page, 'The image could not be shown')).toBeVisible();
+  await expect(shown(page, 'The image could not be shown')).toBeVisible();
 
   await preview(page).getByRole('button', { name: 'Try again' }).click();
   await expectDrawn(page);
-  await expect(seen(page, 'The image could not be shown')).toHaveCount(0);
+  await expect(shown(page, 'The image could not be shown')).toHaveCount(0);
 });
 
 test('storage being down while renewing says so and offers Try again', async ({ page }) => {
   await signInAt(page, `${SEEDED}/preview`, 'creator');
   await simulate(page, 'Expire the link with storage unavailable');
-  await expect(seen(page, 'The image is temporarily unavailable')).toBeVisible({ timeout: 15_000 });
+  await expect(shown(page, 'The image is temporarily unavailable')).toBeVisible({ timeout: 15_000 });
   await preview(page).getByRole('button', { name: 'Try again' }).click();
   await expectDrawn(page);
 });
@@ -90,10 +96,35 @@ test('storage being down while renewing says so and offers Try again', async ({ 
 test('an image from another organisation is not shown', async ({ page }) => {
   await signInAt(page, `${SEEDED}/preview`, 'creator');
   await simulate(page, 'Move the image to another organisation');
-  await expect(seen(page, 'Image not available')).toBeVisible();
+  await expect(shown(page, 'Image not available')).toBeVisible();
   await expect(seen(page, 'It does not exist, or it is not available to you in this organisation.')).toBeVisible();
   await expect(image(page)).toHaveCount(0);
   // Nothing about it is shown from the cache either.
   await expect(seen(page, /Checksum 515151515151/)).toHaveCount(0);
   await expect(seen(page, 'Not available', { exact: true })).toBeVisible();
+});
+
+test('the image is described by its brief, not by its version', async ({ page }) => {
+  await signInAt(page, `${SEEDED}/preview`, 'creator');
+  await expectDrawn(page);
+  await expect(image(page)).not.toHaveAttribute('alt', /version/i);
+});
+
+test('the status region stays mounted and announces renewal failure', async ({ page }) => {
+  await signInAt(page, `${SEEDED}/preview`, 'creator');
+  await expectDrawn(page);
+  // Present (and empty) while the image is shown, so a later message is announced as a change.
+  await expect(status(page)).toHaveCount(1);
+  await expect(status(page)).toHaveText('');
+  await simulate(page, 'Expire the image link twice');
+  await expect(status(page)).toHaveText('The image could not be shown');
+  await preview(page).getByRole('button', { name: 'Try again' }).click();
+  await expectDrawn(page);
+  await expect(status(page)).toHaveText('');
+});
+
+test('storage being down is announced too', async ({ page }) => {
+  await signInAt(page, `${SEEDED}/preview`, 'creator');
+  await simulate(page, 'Expire the link with storage unavailable');
+  await expect(status(page)).toHaveText('The image is temporarily unavailable', { timeout: 15_000 });
 });

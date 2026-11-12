@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useReducer, useState, type ReactElement } from 'react';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
 import { Center } from '@astryxdesign/core/Center';
 import { HStack, StackItem, VStack } from '@astryxdesign/core/Layout';
@@ -24,47 +24,50 @@ import { initialRenewal, renewalStep } from './imageRenewal';
  */
 export function GeneratedImagePreview({ assetId, alt, ratio = 1, provenance = true }: {
   assetId: string;
-  /** What the image is in this context, e.g. "Image for version 3 of this draft". */
+  /** What the image shows, e.g. from `imageAltForBrief`; never where it came from. */
   alt: string;
   /** Width / height of the frame; the image is cropped to fill it. */
   ratio?: number;
   /** Show origin, provider, size, time and checksum under the image. Off where the page shows them already. */
   provenance?: boolean;
-}) {
+}): ReactElement {
   // A new asset starts from scratch: no error or renewal state carries over.
   return <ImagePreview key={assetId} assetId={assetId} alt={alt} ratio={ratio} provenance={provenance} />;
 }
 
-function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; alt: string; ratio: number; provenance: boolean }) {
+function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; alt: string; ratio: number; provenance: boolean }): ReactElement {
   const asset = useAsset(assetId);
   const [renewal, dispatch] = useReducer(renewalStep, initialRenewal);
   const [fullSize, setFullSize] = useState(false);
   const { refetch } = asset;
 
-  useEffect(() => {
-    if (renewal.phase !== 'renewing') return;
-    let current = true;
-    void refetch().then((r) => { if (current) dispatch({ type: r.isError ? 'renew_failed' : 'renewed' }); });
-    return () => { current = false; };
-  }, [renewal.phase, renewal.attempt, refetch]);
+  // Renewal runs in the event that needs it. The reducer ignores late answers, and the
+  // component is keyed by assetId, so an answer for another image cannot land here.
+  const renew = async (event: 'load_failed' | 'retry'): Promise<void> => {
+    const next = renewalStep(renewal, { type: event });
+    dispatch({ type: event });
+    if (next.phase !== 'renewing') return;
+    let renewed = false;
+    try {
+      renewed = !(await refetch()).isError;
+    } catch {
+      // refetch reports errors in its result; anything thrown still ends in the "Try again" state, never a rejection.
+    }
+    dispatch({ type: renewed ? 'renewed' : 'renew_failed' });
+  };
 
   const denied = assetDenied(asset.error);
   const data = denied ? undefined : asset.data;
   const fullAlt = data && isSimulatedAsset(data) ? `${alt} (simulation placeholder)` : alt;
   const unavailable = isApiError(asset.error) && asset.error.kind === 'unavailable';
-  const tryAgain = () => { if (renewal.phase === 'failed') dispatch({ type: 'retry' }); else void refetch(); };
+  const tryAgain = (): void => { if (renewal.phase === 'failed') void renew('retry'); else void refetch(); };
 
   const drawing = !!data?.download_url && !asset.isPending && (renewal.phase === 'loading' || renewal.phase === 'shown');
   let frame;
   if (denied) {
     frame = <Notice icon="lock" title="Image not available" text="It does not exist, or it is not available to you in this organisation." />;
   } else if (asset.isPending || renewal.phase === 'renewing') {
-    frame = (
-      <>
-        <div aria-hidden data-loading=""><Skeleton height="100%" radius="none" /></div>
-        <VisuallyHidden><span role="status">{asset.isPending ? 'Loading the image' : 'Renewing the image link'}</span></VisuallyHidden>
-      </>
-    );
+    frame = <div aria-hidden data-loading=""><Skeleton height="100%" radius="none" /></div>;
   } else if (renewal.phase === 'failed' || !data?.download_url) {
     frame = unavailable
       ? <Notice icon="warn" title="The image is temporarily unavailable" text="Image storage did not answer. Try again in a minute; the rest of the draft is unchanged." action={tryAgain} />
@@ -73,12 +76,20 @@ function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; al
     // The attempt key draws a fresh <img> for every renewed link, even when the link text is unchanged.
     frame = (
       <img key={renewal.attempt} src={data.download_url} alt={fullAlt}
-        onLoad={() => dispatch({ type: 'loaded' })} onError={() => dispatch({ type: 'load_failed' })} />
+        onLoad={() => dispatch({ type: 'loaded' })} onError={() => void renew('load_failed')} />
     );
   }
 
+  // One region, mounted for the component's life: a live region that appears already filled is not announced.
+  const status = denied ? 'Image not available'
+    : asset.isPending ? 'Loading the image'
+    : renewal.phase === 'renewing' ? 'Renewing the image link'
+    : renewal.phase === 'failed' || !data?.download_url ? (unavailable ? 'The image is temporarily unavailable' : 'The image could not be shown')
+    : '';
+
   return (
     <>
+      <VisuallyHidden><span role="status" aria-live="polite" data-image-status="">{status}</span></VisuallyHidden>
       <AspectRatio ratio={ratio} fit={drawing ? 'cover' : undefined}>{frame}</AspectRatio>
       {data && drawing && renewal.phase === 'shown' && (
         <Section variant="transparent" padding={4}>
@@ -100,7 +111,7 @@ function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; al
 }
 
 /** Where the image came from, its size and time, and a short checksum. Always a draft for review. */
-export function AssetProvenance({ asset }: { asset: Asset }) {
+export function AssetProvenance({ asset }: { asset: Asset }): ReactElement {
   const simulated = isSimulatedAsset(asset);
   return (
     <VStack gap={1}>
@@ -123,7 +134,7 @@ export function AssetProvenance({ asset }: { asset: Asset }) {
   );
 }
 
-function Notice({ icon, title, text, action }: { icon: IconName; title: string; text: string; action?: () => void }) {
+function Notice({ icon, title, text, action }: { icon: IconName; title: string; text: string; action?: () => void }): ReactElement {
   return (
     <Center axis="both" height="100%" padding={6}>
       <VStack gap={2} hAlign="center">

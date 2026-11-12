@@ -14,3 +14,9 @@ export const fmtDateTime = (iso: string) =>
 
 export const initials = (name: string) =>
   name.split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase();
+
+/** The first `maxWords` words, whitespace tidied, with "…" when something was cut. */
+export function truncateWords(text: string, maxWords: number): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  return words.length > maxWords ? `${words.slice(0, maxWords).join(' ')}…` : words.join(' ');
+}

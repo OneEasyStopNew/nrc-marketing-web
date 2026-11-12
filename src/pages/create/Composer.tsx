@@ -16,6 +16,7 @@ import { Select, Textarea } from '@/components/ui/Form';
 import { Alert, TwoColumn } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
 import { UnsavedChangesPrompt } from '@/components/UnsavedChangesPrompt';
+import { imageAltForBrief } from '@/components/media/imageAlt';
 import { charCount, fmtDateTime } from '@/lib/utils';
 import {
   ConflictDialog, formatKey, formatLabel, languageLabel, PostPreview, ReadinessCard,
@@ -203,7 +204,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           <SaveStatus state={ed.state} version={creative?.version} />
         </HStack>
         <PostPreview tenantName={context.tenant.name} caption={ed.text.caption} format={format}
-          image={creative?.asset_id ? { assetId: creative.asset_id, alt: 'Image for this draft' } : undefined} />
+          image={creative?.asset_id ? { assetId: creative.asset_id, alt: imageAltForBrief(creative.current_prompt) } : undefined} />
         {creative && (
           <Button variant="secondary" block href={`/marketing/create/${encodeURIComponent(creative.id)}/preview`}
             onClick={(e) => { if (ed.dirty) { e.preventDefault(); toast('Save your changes first', 'waiting', 'The final preview shows saved versions only.'); } }}>
