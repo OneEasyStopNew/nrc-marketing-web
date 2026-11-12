@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { skipToken, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import type { Creative } from '@/api/creatives';
 import { isApiError, type ApiError } from '@/api/errors';
@@ -54,12 +54,12 @@ export function jobPollDelay(job: Pick<Job, 'state' | 'created_at'>, attempt: nu
  * window ends. Polling pauses while the tab is hidden and stops on a terminal
  * state or a non-retryable error. Reading a job never starts another generation.
  */
-export function useJob(jobId: string | null) {
+export function useJob(jobId: string | null): UseQueryResult<Job> {
   const { context } = useSession();
   return useQuery({
     queryKey: ['job', context.tenant.tenant_id, jobId],
-    queryFn: ({ signal }) => jobsApi.get(jobId!, signal),
-    enabled: !!jobId,
+    // skipToken: no job in the address means nothing to read, and no `jobId!` to trust.
+    queryFn: jobId ? ({ signal }) => jobsApi.get(jobId, signal) : skipToken,
     refetchInterval: (q) => {
       const job = q.state.data;
       if (!job || q.state.error) return false;
@@ -102,7 +102,15 @@ export const commandAfterProblem = (pending: PendingCommand, problem: StartProbl
  * already have created instead of starting a second one. The key changes only
  * when the version changes or the backend refused the command for good.
  */
-export function useStartGeneration() {
+export interface StartGeneration {
+  start: (creative: Pick<Creative, 'id' | 'version'>) => Promise<void>;
+  starting: boolean;
+  problem: StartProblem | null;
+  /** The job in the address, if any. */
+  jobId: string | null;
+}
+
+export function useStartGeneration(): StartGeneration {
   const navigate = useNavigate();
   const { jobId } = useParams();
   const [starting, setStarting] = useState(false);
@@ -110,26 +118,33 @@ export function useStartGeneration() {
   const pending = useRef<PendingCommand | null>(null);
   // Set synchronously, so a second click in the same frame is ignored before React re-renders.
   const inFlight = useRef(false);
+  // Aborted when the page goes away, so a late answer never pulls the user back to the job.
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
 
-  const start = async (creative: Creative) => {
+  const start = async (creative: Pick<Creative, 'id' | 'version'>) => {
     if (inFlight.current) return;
     inFlight.current = true;
+    const ctrl = new AbortController();
+    request.current = ctrl;
     const body = { creative_id: creative.id, creative_version: creative.version };
     const command = commandFor(pending.current, JSON.stringify(body));
     pending.current = command;
     setStarting(true);
     setProblem(null);
     try {
-      const accepted = await jobsApi.start(body, command.key);
+      const accepted = await jobsApi.start(body, command.key, ctrl.signal);
+      if (ctrl.signal.aborted) return;
       pending.current = null;
       navigate(jobPath(creative.id, accepted.job_id), { replace: true });
     } catch (e: unknown) {
+      if (ctrl.signal.aborted) return; // The user left; nothing to show.
       const p = isApiError(e) ? startProblem(e) : UNEXPECTED_PROBLEM;
       pending.current = commandAfterProblem(command, p);
       setProblem(p);
     } finally {
       inFlight.current = false;
-      setStarting(false);
+      if (!ctrl.signal.aborted) setStarting(false);
     }
   };
 
@@ -165,12 +180,23 @@ const NOT_ELIGIBLE: Record<EligibilityReason, Copy> = {
 };
 const NOT_ELIGIBLE_OTHER: Copy = { title: 'This draft cannot be generated', detail: 'Check the study and the draft settings, then try again.' };
 
+// Own keys only: `in` also matches inherited names such as "constructor". (Object.hasOwn needs lib ES2022.)
+const isEligibilityReason = (reason: string): reason is EligibilityReason =>
+  Object.prototype.hasOwnProperty.call(NOT_ELIGIBLE, reason);
+
 const notEligible = (reason: string | undefined): Copy =>
-  (reason && reason in NOT_ELIGIBLE ? NOT_ELIGIBLE[reason as EligibilityReason] : NOT_ELIGIBLE_OTHER);
+  (reason !== undefined && isEligibilityReason(reason) ? NOT_ELIGIBLE[reason] : NOT_ELIGIBLE_OTHER);
+
+/** details.reason when the error body carries one as text; server data, so nothing is assumed. */
+function reasonOf(details: unknown): string | undefined {
+  if (typeof details !== 'object' || details === null) return undefined;
+  const reason: unknown = Object.getOwnPropertyDescriptor(details, 'reason')?.value;
+  return typeof reason === 'string' ? reason : undefined;
+}
 
 /** Maps the backend's refusal to what the user can do about it. */
 export function startProblem(e: ApiError): StartProblem {
-  const reason = (e.details as { reason?: string } | undefined)?.reason;
+  const reason = reasonOf(e.details);
   const base = { requestId: e.requestId };
   switch (e.code) {
     case 'VALIDATION_NOT_PASSED':
@@ -190,6 +216,8 @@ export function startProblem(e: ApiError): StartProblem {
       return reason === 'ACTIVE_JOB_LIMIT'
         ? { ...base, sameCommand: true, title: 'Too many images are being made right now', detail: 'Your organisation has the most generations running at once. Try again when one finishes.' }
         : { ...base, sameCommand: false, title: 'Your organisation has used today\'s image allowance', detail: 'Generation is available again tomorrow, or ask an administrator about the limit.' };
+    default:
+      break; // Not a refusal code this page names: the error's kind decides below.
   }
   switch (e.kind) {
     case 'forbidden':

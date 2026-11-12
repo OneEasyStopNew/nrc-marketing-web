@@ -49,6 +49,17 @@ describe('startProblem', () => {
   it('keeps the same command while the backend reports the same command in flight', () => {
     expect(startProblem(err(409, 'CONFLICT')).sameCommand).toBe(true);
   });
+
+  it('never reads an inherited name or a non-text reason as an eligibility reason', () => {
+    const other = startProblem(err(409, 'GENERATION_NOT_ELIGIBLE')).title;
+    for (const details of [{ reason: 'constructor' }, { reason: 'toString' }, { reason: 7 }, 'STUDY_CLOSED', null]) {
+      expect(startProblem(err(409, 'GENERATION_NOT_ELIGIBLE', details)).title).toBe(other);
+    }
+  });
+
+  it('reads an unknown error code by its kind', () => {
+    expect(startProblem(err(403, 'SOMETHING_NEW')).title).toMatch(/role cannot generate/);
+  });
 });
 
 describe('Generate command key', () => {

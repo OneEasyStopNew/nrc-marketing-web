@@ -274,17 +274,18 @@ const ROUTES: Record<string, Handler> = {
     const active = [...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && !isJobTerminal(readJob(j).state));
     if (active.length >= ACTIVE_JOB_LIMIT) return problem(429, 'GENERATION_LIMIT_REACHED', 'Too many images are being made at once.', true, { reason: 'ACTIVE_JOB_LIMIT' });
 
-    const id = `sim-gen-${crypto.randomUUID().slice(0, 8)}`;
+    const id = crypto.randomUUID();
+    const suffix = id.slice(0, 8);
     const outcome: MockJob['outcome'] = sim === 'rejected' ? 'rejected' : sim === 'unknown' ? 'unknown' : 'image';
     const now = new Date().toISOString();
-    const assetId = `sim-img-${id.slice(8)}`;
+    const assetId = `sim-img-${suffix}`;
     const job: MockJob = {
       tenant_id: c.tenant_id, started_ms: Date.now(), outcome,
       final: {
         job_id: id, kind: IMAGE_GENERATION, creative_id: c.id, creative_version: c.version,
         state: outcome === 'image' ? 'SUCCEEDED' : outcome === 'rejected' ? 'FAILED' : 'UNKNOWN',
         stage: outcome === 'image' ? 'stored' : outcome === 'unknown' ? 'reconcile' : null,
-        provider_request_id: `sim-request-${id.slice(8)}`,
+        provider_request_id: `sim-request-${suffix}`,
         failure_code: outcome === 'rejected' ? 'content_rejected' : null,
         failure_message: null,
         result_asset_id: outcome === 'image' ? assetId : null,

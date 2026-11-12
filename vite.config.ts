@@ -15,13 +15,14 @@ export default defineConfig({
   // Scan every page up front, so the dev server never re-bundles Astryx and
   // reloads the tab the first time a lazy page is opened (that reload loses
   // the in-memory sign-in).
-  optimizeDeps: { entries: ['index.html', 'src/**/*.tsx'] },
+  // Test files are not pages: their Node-only imports (msw/node) must stay out of the browser bundle.
+  optimizeDeps: { entries: ['index.html', 'src/**/*.tsx', '!src/**/*.test.tsx'] },
   build: {
     // Source maps stay out of the public bundle; upload them to error tracking separately if needed.
     sourcemap: false,
   },
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 });

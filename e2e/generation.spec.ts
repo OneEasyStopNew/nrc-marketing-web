@@ -19,6 +19,14 @@ test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
 
 const SEEDED = '/marketing/create/sim-cr-0001';
 const generate = (page: Page) => page.getByRole('button', { name: 'Generate image' });
+/**
+ * Text on screen in the generation panel. The panel's screen-reader status
+ * region repeats its titles, and `seen` only skips Astryx's own live regions.
+ */
+const shown = (page: Page, text: string | RegExp) =>
+  seen(page, text).and(page.locator(':not([role="status"]):not([role="status"] *)'));
+/** A job page: job ids are UUIDs, also in simulation, because the app refuses any other id in a path. */
+const JOB_URL = /\/generation\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * Jobs the fake server has made in this tab. Simulation replaces fetch inside
@@ -33,7 +41,7 @@ test('generates an image with progress and finds the same job after a reload', a
   await expect(generate(page)).toBeEnabled();
   await generate(page).click();
 
-  await expect(page).toHaveURL(/\/generation\/sim-gen-/);
+  await expect(page).toHaveURL(JOB_URL);
   await expect(page.getByRole('progressbar', { name: 'Image generation progress' })).toBeVisible();
   await expect(generate(page)).toBeDisabled();
   const jobUrl = page.url();
@@ -52,7 +60,7 @@ test('generates an image with progress and finds the same job after a reload', a
 test('a double click makes one job', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
   await generate(page).dblclick();
-  await expect(page).toHaveURL(/\/generation\/sim-gen-/);
+  await expect(page).toHaveURL(JOB_URL);
   expect(await storedJobs(page)).toHaveLength(1);
 });
 
@@ -61,7 +69,7 @@ test('a lost response is retried as the same command and finds the job it made',
   await page.getByRole('button', { name: 'Lose the answer to the next Generate' }).click();
   await generate(page).click();
   // The server made the job, but the browser never heard back.
-  await expect(seen(page, 'No answer from NRC Marketing')).toBeVisible();
+  await expect(shown(page, 'No answer from NRC Marketing')).toBeVisible();
   const made = await storedJobs(page);
   expect(made).toHaveLength(1);
 
@@ -74,7 +82,7 @@ test('a refused image explains what to do', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
   await page.getByRole('button', { name: 'Image service refuses the next image' }).click();
   await generate(page).click();
-  await expect(seen(page, 'The image was not made')).toBeVisible({ timeout: 15_000 });
+  await expect(shown(page, 'The image was not made')).toBeVisible({ timeout: 15_000 });
   await expect(seen(page, /refused this brief under its content rules/)).toBeVisible();
 });
 
@@ -82,7 +90,7 @@ test('an unconfirmed job turns Generate off and says it is being checked', async
   await signInAt(page, SEEDED, 'creator');
   await page.getByRole('button', { name: 'Next image stays unconfirmed' }).click();
   await generate(page).click();
-  await expect(seen(page, 'Confirming with the image service')).toBeVisible({ timeout: 15_000 });
+  await expect(shown(page, 'Confirming with the image service')).toBeVisible({ timeout: 15_000 });
   await expect(generate(page)).toBeDisabled();
 });
 
@@ -90,7 +98,7 @@ test('the daily limit is shown and nothing starts', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
   await page.getByRole('button', { name: 'Next Generate hits the daily limit' }).click();
   await generate(page).click();
-  await expect(seen(page, /today's image allowance/)).toBeVisible();
+  await expect(shown(page, /today's image allowance/)).toBeVisible();
   await expect(page).not.toHaveURL(/\/generation\//);
 });
 

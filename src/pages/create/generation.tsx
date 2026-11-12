@@ -1,5 +1,7 @@
+import type { ReactElement } from 'react';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { shortHash, type Asset } from '@/api/assets';
 import { isApiError } from '@/api/errors';
@@ -26,9 +28,11 @@ export function GenerationStatus({ version, job, asset, problem, starting, onRet
   problem: StartProblem | null;
   starting: boolean;
   onRetry: () => void;
-}) {
+}): ReactElement {
   return (
     <VStack gap={3}>
+      {/* Mounted for the panel's whole life, so screen readers hear each change of its text. */}
+      <VisuallyHidden><span role="status" aria-live="polite">{generationAnnouncement({ job, problem, starting })}</span></VisuallyHidden>
       {problem && (
         <Alert tone={problem.sameCommand ? 'waiting' : 'blocked'} title={problem.title}
           action={problem.sameCommand ? <Button variant="secondary" size="sm" icon="refresh" loading={starting} onClick={onRetry}>Try again</Button> : undefined}>
@@ -43,11 +47,32 @@ export function GenerationStatus({ version, job, asset, problem, starting, onRet
   );
 }
 
+const notAvailable = (e: unknown): boolean => isApiError(e) && (e.kind === 'not_found' || e.kind === 'forbidden');
+
+/**
+ * What the panel's status region says: the start problem, else where the job
+ * is. Waiting problems are announced here too, so they need no role of their own.
+ */
+export function generationAnnouncement({ job, problem, starting }: {
+  job: Pick<UseQueryResult<Job>, 'isPending' | 'isError' | 'error' | 'data' | 'dataUpdatedAt'> | null;
+  problem: StartProblem | null;
+  starting: boolean;
+}): string {
+  if (problem) return problem.title;
+  if (starting) return 'Starting the image generation';
+  if (!job) return '';
+  if (job.isPending) return 'Loading the generation';
+  if (job.isError || !job.data) {
+    return notAvailable(job.error) ? 'This generation is not available' : 'The generation status could not be loaded';
+  }
+  if (jobPollingExpired(job.data, job.dataUpdatedAt)) return 'Automatic checking has stopped';
+  return `Image generation: ${jobProgress(job.data).label}`;
+}
+
 function JobState({ version, job, asset }: { version: number; job: UseQueryResult<Job>; asset: UseQueryResult<Asset> }) {
   if (job.isPending) return <SkeletonRows rows={2} />;
   if (job.isError || !job.data) {
-    const e = job.error;
-    if (isApiError(e) && (e.kind === 'not_found' || e.kind === 'forbidden')) {
+    if (notAvailable(job.error)) {
       return <Alert tone="waiting" title="This generation is not available">It does not exist, or it belongs to another organisation. Generate again from this draft.</Alert>;
     }
     return (
@@ -84,7 +109,7 @@ function JobState({ version, job, asset }: { version: number; job: UseQueryResul
           {forVersion}
           {a && (
             <Text type="supporting" color="secondary">
-              {a.provider ?? 'Unknown service'}{a.model && ` (${a.model})`} · {a.width_px}×{a.height_px} · {fmtDateTime(a.created_at)} · reference {shortHash(a.checksum_sha256)}
+              {a.provider ?? 'Unknown service'}{a.model && ` (${a.model})`} Â· {a.width_px}Ã—{a.height_px} Â· {fmtDateTime(a.created_at)} Â· reference {shortHash(a.checksum_sha256)}
             </Text>
           )}
           {asset.isError && <Alert tone="waiting" title="The image could not be shown">It is saved. Reload the page to fetch a new link.</Alert>}

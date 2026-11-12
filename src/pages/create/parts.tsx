@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
@@ -192,7 +192,7 @@ export function ReadinessCard({ creative, editing, validate, generation }: {
   validate?: { onClick: () => void; busy: boolean };
   /** Generation status for this draft; `start` is present when this user may generate now. */
   generation: GenerationSummary;
-}) {
+}): ReactElement {
   const current = currentValidation(creative);
   const latest = latestValidation(creative);
   type V = { variant: 'neutral' | 'done' | 'blocked' | 'waiting' | 'brand'; text: string; note?: string };

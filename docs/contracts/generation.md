@@ -52,12 +52,12 @@ All of them are under `/v1/marketing`. They need `Authorization: Bearer`, `X-Ten
 
 | File | Contents |
 |---|---|
-| `src/api/jobs.ts` | `jobsApi.start` / `jobsApi.get`, `JOB_STAGES`, which mirror the backend's `JobStage` until the generated type exists, `jobProgress` (state and stage to step), `failureText`, `isJobTerminal` |
+| `src/api/jobs.ts` | `jobsApi.start` / `jobsApi.get`, `JOB_STAGES`, which mirror the backend's `JobStage` until the generated type exists, `jobProgress` (state and stage to step), `failureText`, `isJobTerminal`. Every answer is checked by `parseJob` / `parseJobAccepted`: a state this build doesn't know shows as `UNKNOWN` ("Being confirmed"), and a body that breaks the contract is an error, not a crash. Job ids must be UUIDs before they go into a path (a malformed id in the address reads as "not available", with no request). Each request times out after 15 s; a timeout counts as a lost answer, so "Try again" resends the same Idempotency-Key |
 | `src/pages/create/useGeneration.ts` | `useJob` (polling with backoff and jitter, 15 s while UNKNOWN or NEEDS_REVIEW, stops 30 minutes after `created_at` and offers "Check again"), `useStartGeneration` (one key per command, reused after a lost or temporary failure), `startProblem` (error to copy), `generationSummary`, `jobPath` |
-| `src/pages/create/generation.tsx` | `GenerationStatus`: the step 4 panel (progress, failed, unconfirmed, review, saved image with provenance) |
+| `src/pages/create/generation.tsx` | `GenerationStatus`: the step 4 panel (progress, failed, unconfirmed, review, saved image with provenance). One screen-reader status region stays mounted for the panel's life and says where the job is or why it could not start |
 | `src/pages/create/parts.tsx` | `ReadinessCard` gains the Generation row and the **Generate image** button. It's enabled only for a saved version whose current validation passed, with `generation:run`, and no job running or unconfirmed. Generate becomes the primary button once validation has passed |
 | `src/pages/create/Composer.tsx`, `CreatePage.tsx` | Wiring, and the route `/marketing/create/:creativeId/generation/:jobId`. The job id is in the **path** because sign-in keeps only the path, so a reload finds the same job |
-| `src/mocks/api.ts`, `server.ts`, `types.ts` | Simulation: `POST /creative-jobs` and `GET /jobs/:id` follow the backend's states and codes. Jobs persist in sessionStorage. The Simulation tools card can make the next image be refused, stay unconfirmed, hit the daily limit or lose its answer |
+| `src/mocks/api.ts`, `server.ts`, `types.ts` | Simulation: `POST /creative-jobs` and `GET /jobs/:id` follow the backend's states and codes. Simulated job ids are UUIDs like the backend's. Jobs persist in sessionStorage. The Simulation tools card can make the next image be refused, stay unconfirmed, hit the daily limit or lose its answer |
 | `e2e/generation.spec.ts` | Progress and reload recovery, double click (1 job), lost answer (same job), refused, unconfirmed, limit, edited brief |
 | `e2e/create.spec.ts` | One assertion updated: Generate is now offered for a passed version, and turned off after an edit |
 
