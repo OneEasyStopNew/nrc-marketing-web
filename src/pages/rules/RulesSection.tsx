@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy, type JSX } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import NoPermission from '@/pages/NoPermission';
@@ -17,7 +17,7 @@ const RulesPage = lazy(() => import('./RulesPage'));
  * from the viewer and the administrator's home page when they hold
  * policy:manage); its editing controls show "not available yet" for the demo.
  */
-export default function RulesSection() {
+export default function RulesSection(): JSX.Element {
   const { can } = useAuth();
   return (
     <Routes>

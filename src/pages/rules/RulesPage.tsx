@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
@@ -25,12 +25,16 @@ import { fmtDateTime } from '@/lib/utils';
 import { useRules, useWorkspaceMutation } from '@/pages/shared/queries';
 import { GATE_LABEL, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
 
-// Demo decision (NRC-20, 13 Nov): the backend has no rule-writing endpoints yet, so edit controls stay visible but only explain that.
-// Set to true to bring back the editor, drafts and activate/retire confirmations unchanged.
+// Temporary switch. Owner: Firoz (NRC-20). Demo decision (13 Nov): the backend has no rule-writing
+// endpoints yet, so edit controls stay visible but only explain that.
+// Remove when the backend /rules write endpoints (draft, edit, activate, retire; Dinesh) are merged.
+// Undo: delete RULE_EDITING_AVAILABLE and useRuleEditing (call the open functions directly), turn the
+// test.fixme 'a policy administrator drafts a rule…' in e2e/workspace.spec.ts back into test, and delete
+// the 'rule editing controls stay visible but only explain…' test and its layout audit case.
 const RULE_EDITING_AVAILABLE = false;
 
 /** Runs a rule-writing action when editing is available; otherwise says why nothing opens. No API call is made. */
-function useRuleEditing() {
+function useRuleEditing(): (open: () => void) => void {
   const { toast } = useToast();
   return (open: () => void) => {
     if (RULE_EDITING_AVAILABLE) open();
@@ -48,7 +52,7 @@ const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
  * against, each traced to the clause it comes from. Policy administrators
  * draft and edit rules; a draft applies only once activated.
  */
-export default function RulesPage() {
+export default function RulesPage(): JSX.Element {
   const { can } = useAuth();
   const rules = useRules();
   const [status, setStatus] = useState<RuleStatus>('ACTIVE');

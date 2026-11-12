@@ -104,7 +104,29 @@ test('a publisher queues an approved post; it is never shown as published', asyn
 // Demo decision (NRC-20, 13 Nov): rule editing is switched off (RULE_EDITING_AVAILABLE in RulesPage.tsx)
 // because the backend has no rule-writing endpoints yet. The controls stay where they are and explain
 // that instead of opening the editor or a confirmation. The editor's own flow (validation messages,
-// draft, activate) is not reachable until the flag is turned back on; restore that test then.
+// draft, activate) is not reachable until the flag is turned back on.
+// fixme while RULE_EDITING_AVAILABLE is false (RulesPage.tsx): turn back into test() when the flag goes.
+test.fixme('a policy administrator drafts a rule with its source, then activates it', async ({ page }) => {
+  await signInAt(page, '/marketing/rules/manage', 'policy-admin');
+  await page.getByRole('button', { name: 'New rule' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New rule' });
+  await dialog.getByRole('button', { name: 'Save draft' }).click();
+  await expect(seen(page, 'Give the rule a short title.')).toBeVisible();
+  await expect(seen(page, 'Cite the clause this rule comes from.')).toBeVisible();
+
+  await dialog.getByRole('textbox', { name: /^Title/ }).fill('Placeholder rule for the test');
+  await dialog.getByRole('textbox', { name: /^What it checks/ }).fill('Placeholder description (simulation).');
+  await dialog.getByRole('textbox', { name: /^Clause/ }).first().fill('Sim 9.9');
+  await dialog.getByRole('button', { name: 'Save draft' }).click();
+  await expect(seen(page, /drafted$/)).toBeVisible();
+
+  await page.getByRole('tab', { name: /Drafts/ }).click();
+  await page.getByRole('button', { name: 'Placeholder rule for the test' }).click();
+  await page.getByRole('button', { name: 'Activate' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: /Activate/ }).click();
+  await expect(seen(page, /is now active$/)).toBeVisible();
+});
+
 test('rule editing controls stay visible but only explain that editing is not available yet', async ({ page }) => {
   // Rule administration is parked under /manage while the Rules section shows the read-only active policy (NRC-20).
   await signInAt(page, '/marketing/rules/manage', 'policy-admin');

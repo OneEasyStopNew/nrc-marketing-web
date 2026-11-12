@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import { workspaceApi } from '@/api/workspace';
-import { policiesApi } from '@/api/policies';
+import { activePolicyQuery, type ActivePolicy } from '@/api/policies';
 
 /**
  * Data for the workspace sections and dashboards. Every key starts with the
@@ -26,10 +26,8 @@ export const useRules = (enabled = true) => {
   return useQuery({ queryKey: ['ws', t, 'rules'], queryFn: ({ signal }) => workspaceApi.rules(signal), enabled });
 };
 /** The tenant's active policy (NRC-20, read-only). */
-export const useActivePolicy = (enabled = true) => {
-  const t = useTenant();
-  return useQuery({ queryKey: ['ws', t, 'policy-active'], queryFn: ({ signal }) => policiesApi.active(signal), enabled });
-};
+// Key and fetch come from activePolicyQuery, so the viewer, /context and eligibility can be invalidated together.
+export const useActivePolicy = (enabled = true): UseQueryResult<ActivePolicy> => useQuery({ ...activePolicyQuery(useTenant()), enabled });
 export const useApprovals = (enabled = true) => {
   const t = useTenant();
   return useQuery({ queryKey: ['ws', t, 'approvals'], queryFn: ({ signal }) => workspaceApi.approvals(signal), enabled });

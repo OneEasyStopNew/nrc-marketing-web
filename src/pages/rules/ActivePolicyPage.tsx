@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, type JSX } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { Blockquote } from '@astryxdesign/core/Blockquote';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
@@ -7,7 +8,7 @@ import { Selector } from '@astryxdesign/core/Selector';
 import { Text } from '@astryxdesign/core/Text';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
-import { isNoActivePolicy, type ActivePolicy, type ActivePolicyRule, type PolicySeverity } from '@/api/policies';
+import type { ActivePolicy, ActivePolicyRule } from '@/api/policies';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHead } from '@/components/ui/Card';
@@ -16,7 +17,10 @@ import { Alert, EmptyState, PageHeader, SkeletonRows } from '@/components/ui/Mis
 import { fmtDateTime } from '@/lib/utils';
 import { useActivePolicy } from '@/pages/shared/queries';
 import { GATE_LABEL, QueryState, SectionTitle, SeverityBadge } from '@/pages/shared/ui';
-import { filterRules, inputsLabel, isFiltered, NO_FILTER, RULE_ADMIN_PATH, type PolicyFilter } from './activePolicy';
+import {
+  filterFromParams, filterRules, inputsLabel, isFiltered, isMandatoryFilter, isSeverityFilter, labelFor, NO_FILTER, paramsWithFilter,
+  POLICY_STATUS_TEXT, policyLoadState, RULE_ADMIN_PATH, type PolicyFilter,
+} from './activePolicy';
 
 /**
  * Rules (NRC-20 demo slice): the tenant's active policy, read-only. Shows the
@@ -24,37 +28,39 @@ import { filterRules, inputsLabel, isFiltered, NO_FILTER, RULE_ADMIN_PATH, type 
  * clause it comes from, worded exactly as the API supplies it. No editing,
  * upload or activation here; rule administration comes later.
  */
-export default function ActivePolicyPage() {
+export default function ActivePolicyPage(): JSX.Element {
   const policy = useActivePolicy();
   const { can } = useAuth();
+  const state = policyLoadState(policy);
 
   return (
     <VStack gap={8}>
       <PageHeader title="Rules" description="The active policy that every brief, caption and image is checked against. Read-only."
         actions={can('policy:manage') ? <Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button> : undefined} />
-      {policy.isPending ? <Loading />
-        : policy.isError && isNoActivePolicy(policy.error) ? <SetupRequired />
+      {state === 'loading' ? <Loading />
+        : state === 'setup_required' ? <SetupRequired />
           : (
             <QueryState query={policy} what="the active policy">
-              {(p) => (p.rules.length ? <PolicyView policy={p} /> : <SetupRequired />)}
+              {(p) => <PolicyView policy={p} />}
             </QueryState>
           )}
+      {/* Mounted for the page's whole life so each state change is announced. */}
+      <VisuallyHidden><span role="status" aria-live="polite">{POLICY_STATUS_TEXT[state]}</span></VisuallyHidden>
     </VStack>
   );
 }
 
-function Loading() {
+function Loading(): JSX.Element {
   return (
     <VStack gap={6}>
       <Card><SkeletonRows rows={3} /></Card>
       <Card><SkeletonRows rows={5} /></Card>
-      <VisuallyHidden><span role="status">Loading the active policy</span></VisuallyHidden>
     </VStack>
   );
 }
 
 /** No approved policy: validation cannot run. A setup gap, never "no violations". */
-function SetupRequired() {
+function SetupRequired(): JSX.Element {
   return (
     <Card aria-label="Policy setup required">
       <EmptyState icon="shield" title="Policy setup required"
@@ -63,10 +69,13 @@ function SetupRequired() {
   );
 }
 
-function PolicyView({ policy: p }: { policy: ActivePolicy }) {
-  const [filter, setFilter] = useState<PolicyFilter>(NO_FILTER);
+function PolicyView({ policy: p }: { policy: ActivePolicy }): JSX.Element {
+  // Filters live in the URL: a filtered view can be shared and survives Manage rules and back.
+  const [params, setParams] = useSearchParams();
+  const filter = useMemo(() => filterFromParams(params), [params]);
   const rows = useMemo(() => filterRules(p.rules, filter), [p.rules, filter]);
-  const set = <K extends keyof PolicyFilter>(k: K, v: PolicyFilter[K]) => setFilter((f) => ({ ...f, [k]: v }));
+  const setFilter = (f: PolicyFilter): void => setParams((prev) => paramsWithFilter(prev, f), { replace: true });
+  const set = <K extends keyof PolicyFilter>(k: K, v: PolicyFilter[K]): void => setFilter({ ...filter, [k]: v });
   const mandatoryCount = p.rules.filter((r) => r.mandatory).length;
 
   return (
@@ -99,9 +108,9 @@ function PolicyView({ policy: p }: { policy: ActivePolicy }) {
             <TextInput label="Search rules" isLabelHidden type="search" placeholder="Search by ID, wording or clause" value={filter.search}
               onChange={(v) => set('search', v)} hasClear startIcon={<Icon name="search" />} />
           </VStack>
-          <Selector label="Severity" isLabelHidden value={filter.severity} onChange={(v) => set('severity', (v ?? 'any') as PolicySeverity | 'any')}
+          <Selector label="Severity" isLabelHidden value={filter.severity} onChange={(v) => set('severity', isSeverityFilter(v) ? v : 'any')}
             options={[{ value: 'any', label: 'Any severity' }, { value: 'critical', label: 'Critical' }, { value: 'major', label: 'Major' }, { value: 'minor', label: 'Minor' }]} />
-          <Selector label="Mandatory" isLabelHidden value={filter.mandatory} onChange={(v) => set('mandatory', (v ?? 'any') as PolicyFilter['mandatory'])}
+          <Selector label="Mandatory" isLabelHidden value={filter.mandatory} onChange={(v) => set('mandatory', isMandatoryFilter(v) ? v : 'any')}
             options={[{ value: 'any', label: 'Mandatory and optional' }, { value: 'mandatory', label: 'Mandatory only' }, { value: 'optional', label: 'Optional only' }]} />
         </HStack>
         <Text type="supporting" color="secondary">
@@ -119,7 +128,7 @@ function PolicyView({ policy: p }: { policy: ActivePolicy }) {
 }
 
 /** One rule. Title, requirement, clause and excerpt are rendered exactly as supplied. */
-function RuleCard({ rule: r }: { rule: ActivePolicyRule }) {
+function RuleCard({ rule: r }: { rule: ActivePolicyRule }): JSX.Element {
   return (
     <Card aria-label={`Rule ${r.rule_id}`}>
       <VStack gap={1}>
@@ -136,7 +145,7 @@ function RuleCard({ rule: r }: { rule: ActivePolicyRule }) {
         <MetadataListItem label="Clause"><Text type="body">{r.source.clause}</Text></MetadataListItem>
         <MetadataListItem label="Source document"><Text type="body">{r.source.source_id}</Text></MetadataListItem>
         <MetadataListItem label="Applies to"><Text type="body">{inputsLabel(r.applies_to)}</Text></MetadataListItem>
-        <MetadataListItem label="Check area"><Text type="body">{GATE_LABEL[r.gate] ?? r.gate}</Text></MetadataListItem>
+        <MetadataListItem label="Check area"><Text type="body">{labelFor(GATE_LABEL, r.gate)}</Text></MetadataListItem>
       </MetadataList>
       {r.source.excerpt && <Blockquote>{r.source.excerpt}</Blockquote>}
     </Card>
