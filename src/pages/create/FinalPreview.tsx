@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactElement, type ReactNode } from 'react';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Link as AxLink } from '@astryxdesign/core/Link';
@@ -22,16 +22,18 @@ import { AssetProvenance } from '@/components/media/GeneratedImagePreview';
 import { imageAltForBrief } from '@/components/media/imageAlt';
 import { runImageSimulation } from './imageSimulation';
 import { SIMULATION_BUILD } from '@/config/env';
+import { saveFile } from '@/lib/download';
 import { fmtDateTime } from '@/lib/utils';
 import { useValidationRun } from '@/pages/validation/useValidation';
 import { formatLabel, languageLabel, PostPreview } from './parts';
+import { useValidationReport } from './useValidationReport';
 
 /**
  * /marketing/create/:creativeId/preview: the exact saved version as it would
  * be posted, with what it was checked against, and the review-draft export.
  * It stays a "Draft for review": reviewer approval is a later, separate step.
  */
-export default function FinalPreview() {
+export default function FinalPreview(): ReactElement {
   const { creativeId = '' } = useParams();
   const { context } = useSession();
   const { mode } = useAuth();
@@ -50,6 +52,13 @@ export default function FinalPreview() {
   const latest = creative ? latestValidation(creative) : undefined;
   const run = useValidationRun(latest?.validation_run_id ?? '');
   const [exporting, setExporting] = useState(false);
+  // The draft's image id is passed even when the image failed to load, so a load error is not read as "the draft changed".
+  const report = useValidationReport({
+    creativeId,
+    version: creative?.version ?? 0,
+    runId: latest?.validation_run_id,
+    asset: creative?.asset_id ? { id: creative.asset_id, checksumSha256: image?.checksum_sha256 ?? null } : undefined,
+  });
 
   const draftLink = `/marketing/create/${encodeURIComponent(creativeId)}`;
   const crumbs = [{ label: 'Create post', to: '/marketing/create' }, { label: 'Draft', to: draftLink }, { label: 'Final preview' }];
@@ -83,12 +92,7 @@ export default function FinalPreview() {
     try {
       const manifest = await assetsApi.exportDraft(creative.id);
       const blob = new Blob([JSON.stringify(manifestForDownload(manifest), null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nrc-review-draft-${creative.id}-v${manifest.creative_version}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      saveFile(`nrc-review-draft-${creative.id}-v${manifest.creative_version}.json`, blob);
       toast(`Review draft for version ${manifest.creative_version} downloaded`, 'done', 'It is marked DRAFT. It is not an approval.');
     } catch (e) {
       if (!isApiError(e)) throw e;
@@ -130,6 +134,10 @@ export default function FinalPreview() {
         actions={(
           <>
             <Button variant="secondary" href={draftLink}>Back to the draft</Button>
+            {/* Secondary: one primary per view. Disabled until a finished run exists; the Validation row says why. */}
+            <Button variant="secondary" icon="dl" loading={report.downloading} disabled={!latest || isInProgress(latest.state)} onClick={() => void report.download()}>
+              Download validation report
+            </Button>
             <Button variant="primary" icon="dl" loading={exporting} disabled={!creative.asset_id} onClick={() => void download()}>
               Download review draft
             </Button>

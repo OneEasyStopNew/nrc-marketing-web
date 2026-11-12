@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { Link as AxLink } from '@astryxdesign/core/Link';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Heading, Text } from '@astryxdesign/core/Text';
@@ -35,7 +35,7 @@ export function VersionHistory({ creative, current, onRestore, readOnly }: {
   current: BriefText;
   onRestore: (v: Version) => void;
   readOnly: boolean;
-}) {
+}): ReactElement {
   const { context } = useSession();
   const q = useInfiniteQuery({
     queryKey: ['creative-versions', context.tenant.tenant_id, creative.id, creative.version],
@@ -169,7 +169,7 @@ function DiffBlock({ label, before, after }: { label: string; before: string; af
  * fix them in place. They describe the version that was checked; after an
  * edit they are a to-do list, not a result.
  */
-export function FindingsToFix({ creative, editing }: { creative: Creative; editing: boolean }) {
+export function FindingsToFix({ creative, editing }: { creative: Creative; editing: boolean }): ReactElement | null {
   const latest = latestValidation(creative);
   if (!latest || isInProgress(latest.state) || latest.state === 'FAILED' || latest.state === 'CANCELLED' || latest.outcome === 'PASS') return null;
   return <FindingsToFixList creative={creative} runId={latest.validation_run_id} editing={editing} />;
@@ -178,6 +178,17 @@ export function FindingsToFix({ creative, editing }: { creative: Creative; editi
 function FindingsToFixList({ creative, runId, editing }: { creative: Creative; runId: string; editing: boolean }) {
   const q = useValidationRun(runId);
   const run = q.data;
+  // A run that can't be read must not look like "nothing to fix" (e.g. a response the parser rejects).
+  if (q.isError) {
+    return (
+      <section aria-label="Findings to fix"><VStack gap={2}><Divider />
+        <Alert tone="blocked" title="The findings to fix could not be loaded"
+          action={<Button size="sm" variant="secondary" icon="refresh" onClick={() => void q.refetch()}>Try again</Button>}>
+          The last validation may still have findings for this draft. Try again before you rely on this list.
+        </Alert>
+      </VStack></section>
+    );
+  }
   if (!run) return null;
   const unassessed = unassessedMandatory(run);
   if (!run.findings.length && !unassessed.length) return null;
