@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AUTH_MODE, configProblem, SIMULATION_BUILD, type AuthMode } from '@/config/env';
+import { AUTH_MODE, configProblem, DEVTOKEN_BUILD, SIMULATION_BUILD, type AuthMode } from '@/config/env';
 import { configureHttp, setTenant } from '@/api/http';
 import { isApiError } from '@/api/errors';
 import { SESSION_CODES, sessionApi, type Capability, type MarketingContext, type Me } from '@/api/session';
@@ -66,33 +66,45 @@ async function createProvider(): Promise<IdentityProvider> {
     configureHttp({ fetch: mock.mockFetch });
     return sim.createSimulationProvider();
   }
+  if (AUTH_MODE === 'devtoken' && DEVTOKEN_BUILD) {
+    const { createDevTokenProvider } = await import('./devtoken');
+    return createDevTokenProvider();
+  }
   const { createCognitoProvider } = await import('./cognito');
   return createCognitoProvider();
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }): ReactElement {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
-  const [status, setStatus] = useState<AuthStatus>({ kind: 'booting' });
+  const [status, setStatus] = useState<AuthStatus>(() => {
+    const problem = configProblem();
+    return problem ? { kind: 'misconfigured', message: problem } : { kind: 'booting' };
+  });
   const provider = useRef<IdentityProvider | null>(null);
   const refreshing = useRef<Promise<string | null> | null>(null);
   const meRef = useRef<Me | null>(null);
   const booted = useRef(false);
+  const [simulation, setSimulation] = useState<SimulationControls | undefined>(undefined);
   // One channel object per tab: a BroadcastChannel never receives its own messages,
   // so signing out here does not also run this tab's "signed out elsewhere" handler.
   const channel = useRef<BroadcastChannel | null>(null);
 
-  /** Forget everything tenant-scoped held in this tab. */
-  const dropTenantData = useCallback(() => {
+  /**
+   * Forget everything tenant-scoped held in this tab. The cache is cleared only
+   * after in-flight queries are cancelled, so a late response from the old
+   * organisation cannot write itself back.
+   */
+  const dropTenantData = useCallback(async (): Promise<void> => {
     setTenant(null);
-    qc.cancelQueries();
+    await qc.cancelQueries();
     qc.clear();
   }, [qc]);
 
   const expire = useCallback(() => {
     void provider.current?.clear();
-    dropTenantData();
+    void dropTenantData();
     meRef.current = null;
     setStatus((s) => (s.kind === 'signed_out' ? s : { kind: 'signed_out', reason: 'expired' }));
   }, [dropTenantData]);
@@ -108,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const enterTenant = useCallback(async (me: Me, tenantId: string) => {
     setStatus({ kind: 'loading' });
-    dropTenantData();
+    await dropTenantData();
     setTenant(tenantId);
     try {
       const context = await sessionApi.context();
@@ -145,12 +157,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
-    const problem = configProblem();
-    if (problem) { setStatus({ kind: 'misconfigured', message: problem }); return; }
+    // Misconfigured: the initial state already says so; there is nothing to boot.
+    if (configProblem()) return;
 
     void (async () => {
       const p = await createProvider();
       provider.current = p;
+      setSimulation(p.simulation);
       configureHttp({
         tokens: {
           getAccessToken: () => p.getAccessToken(),
@@ -179,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (path === '/signed-out') { setStatus({ kind: 'signed_out', reason: 'signed_out' }); return; }
-      if (p.getAccessToken()) { await loadSession(); return; }
+      if (p.getAccessToken() || p.hasSession?.()) { await loadSession(); return; }
 
       // Reload in a tab that was signed in: tokens were in memory, so go back
       // through Cognito once. Its own session signs the user straight in.
@@ -201,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ch.onmessage = (e) => {
       if (e.data !== 'signed_out') return;
       void provider.current?.clear();
-      dropTenantData();
+      void dropTenantData();
       store.del(ACTIVE);
       store.del(TENANT);
       setStatus({ kind: 'signed_out', reason: 'signed_out' });
@@ -217,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [location.pathname]);
 
   const signOut = useCallback(() => {
-    dropTenantData();
+    void dropTenantData();
     store.del(ACTIVE);
     store.del(TENANT);
     store.del(AUTO_AT);
@@ -234,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const switchTenant = useCallback(() => {
     const me = meRef.current;
     if (!me) return;
-    dropTenantData();
+    void dropTenantData();
     store.del(TENANT);
     navigate(HOME_PATH);
     setStatus({ kind: 'choose_tenant', me });
@@ -242,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const retry = useCallback(() => { void loadSession(); }, [loadSession]);
 
+  // Simulation controls are kept in state when the provider is created, so render never reads a ref.
   const value = useMemo<AuthValue>(() => ({
     status,
     mode: AUTH_MODE,
@@ -251,20 +265,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     switchTenant,
     retry,
     can: (c) => status.kind === 'ready' && status.context.capabilities.includes(c),
-    simulation: provider.current?.simulation,
-  }), [status, signIn, signOut, chooseTenant, switchTenant, retry]);
+    simulation,
+  }), [status, signIn, signOut, chooseTenant, switchTenant, retry, simulation]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-export function useAuth() {
+export function useAuth(): AuthValue {
   const c = useContext(Ctx);
   if (!c) throw new Error('useAuth must be used within AuthProvider');
   return c;
 }
 
+/** A signed-in session with an organisation chosen. */
+export type ReadySession = Extract<AuthStatus, { kind: 'ready' }>;
+
 /** The ready session. Only call inside the signed-in shell. */
-export function useSession() {
+export function useSession(): ReadySession {
   const { status } = useAuth();
   if (status.kind !== 'ready') throw new Error('useSession needs a ready session');
   return status;

@@ -1,15 +1,17 @@
 import { SIMULATION_BUILD } from '@/config/env';
+import { z } from 'zod';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { HStack, VStack, StackItem } from '@astryxdesign/core/Layout';
 import { Grid } from '@astryxdesign/core/Grid';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAsset } from '@/api/assets';
+import { isPlaceholderImage } from '@/api/assets';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth, useSession } from '@/auth/AuthProvider';
 import type { StudySnapshot } from '@/api/session';
-import { CAPTION_MAX, PROMPT_MAX, type DraftSetup, type FieldErrors, type Versioned } from '@/api/creatives';
+import { CAPTION_MAX, PROMPT_MAX, type DraftSetup, type FieldErrors, type GenerationEligibility, type Versioned } from '@/api/creatives';
+import { isApiError } from '@/api/errors';
 import { http } from '@/api/http';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/ui/Card';
@@ -24,7 +26,17 @@ import {
 } from './parts';
 import { useDraftEditor } from './useDraftEditor';
 import { FindingsToFix, VersionHistory } from './revisions';
+import { GenerationStep } from './Generation';
+import { useDraftChecks, useGeneration } from './useDraftChecks';
 import { useStartValidation } from '@/pages/validation/useValidation';
+
+/** The Generation row: only what the server says about this exact version. */
+function generationView(editing: boolean, e: GenerationEligibility | undefined, notConnected: boolean): { variant: 'neutral' | 'done' | 'waiting'; text: string; note?: string } {
+  if (editing) return { variant: 'neutral', text: 'Not yet', note: 'Save your changes, then validate this version.' };
+  if (notConnected) return { variant: 'neutral', text: 'Not available yet', note: 'Generation is not connected in this build yet.' };
+  if (!e) return { variant: 'neutral', text: 'Checking' };
+  return e.eligible ? { variant: 'done', text: 'Allowed', note: e.message } : { variant: 'waiting', text: 'Not yet', note: e.message };
+}
 
 /**
  * The brief editor, laid out like the NRC Connect "Create post" studio: four
@@ -42,7 +54,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   studyPicker?: ReactNode;
   /** New briefs only: the chosen study ('' = not chosen yet). */
   studyId?: string;
-}) {
+}): ReactElement {
   const { context } = useSession();
   const { mode, can } = useAuth();
   const validation = useStartValidation();
@@ -51,7 +63,10 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   const qc = useQueryClient();
   const ed = useDraftEditor({ initial, readOnly });
   const creative = ed.base?.creative;
-  const asset = useAsset(creative?.asset_id);
+  const editing = ed.dirty || ed.state.kind === 'saving';
+  const gen = useGeneration(creative);
+  const asset = gen.asset;
+  const { checks, eligibility } = useDraftChecks(creative, editing, gen.assetId);
 
   const firstFormat = context.post_formats[0];
   const [setup, setSetup] = useState<DraftSetup>(() => creative
@@ -70,9 +85,16 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   useEffect(() => {
     if (!createdId || !ed.base) return;
     navigate(`/marketing/create/${encodeURIComponent(createdId)}`, { state: { versioned: ed.base } });
-  }, [createdId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Once, when the draft is created: later saves change ed.base and must not navigate again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the line above
+  }, [createdId]);
 
-  useEffect(() => { if (ed.state.kind === 'conflict') setConflictOpen(true); }, [ed.state.kind]);
+  // A new conflict opens its dialog. Adjusted during render, not in an effect (no extra render pass).
+  const [seenKind, setSeenKind] = useState(ed.state.kind);
+  if (seenKind !== ed.state.kind) {
+    setSeenKind(ed.state.kind);
+    if (ed.state.kind === 'conflict') setConflictOpen(true);
+  }
 
   // Focus the first field the server (or the local check) rejected.
   useEffect(() => {
@@ -110,7 +132,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   };
 
   const simulate = async (path: string, done: string) => {
-    await http.post(path);
+    await http.post(path, z.unknown());
     toast(done, 'waiting');
   };
 
@@ -119,7 +141,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   return (
     <TwoColumn>
       <Card>
-        {(readOnly || ed.state.kind === 'failed' || (ed.state.kind === 'conflict' && !conflictOpen)) && (
+        {(!!readOnly || ed.state.kind === 'failed' || (ed.state.kind === 'conflict' && !conflictOpen)) && (
           <VStack gap={3}>
             {readOnly && <Alert tone="waiting">{readOnlyReason}</Alert>}
             {ed.state.kind === 'failed' && (
@@ -180,7 +202,11 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
         </Step>
 
         <Step n={4} title="Image">
-          <Text type="body" color="secondary">The image is generated from the brief after the brief passes validation. Generation is added in the next step of this build.</Text>
+          {creative
+            ? <GenerationStep creative={creative} editing={editing} canGenerate={can('generation:run') && !disabled}
+                eligibility={eligibility} job={gen.job} active={gen.active} starting={gen.starting}
+                onGenerate={() => void gen.start()} image={asset.data} />
+            : <Text type="body" color="secondary">The image is generated from the brief after the draft is created and the brief passes validation.</Text>}
         </Step>
 
         {!disabled && (
@@ -205,7 +231,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           <SaveStatus state={ed.state} version={creative?.version} />
         </HStack>
         <PostPreview tenantName={context.tenant.name} caption={ed.text.caption} format={format}
-          image={asset.data?.download_url ? { src: asset.data.download_url, alt: 'Image for this draft' + (asset.data.provider === 'simulation' ? ' (simulation placeholder)' : '') } : undefined} />
+          image={asset.data?.download_url ? { src: asset.data.download_url, alt: 'Image for this draft' + (isPlaceholderImage(asset.data) ? ' (placeholder picture)' : '') } : undefined} />
         {creative && (
           <Button variant="secondary" block href={`/marketing/create/${encodeURIComponent(creative.id)}/preview`}
             onClick={(e) => { if (ed.dirty) { e.preventDefault(); toast('Save your changes first', 'waiting', 'The final preview shows saved versions only.'); } }}>
@@ -213,10 +239,13 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           </Button>
         )}
         {creative && (
-          <ReadinessCard creative={creative} editing={ed.dirty || ed.state.kind === 'saving'}
-            validate={can('validation:run') && !disabled && ed.state.kind === 'saved'
-              ? { onClick: () => void validation.start(creative), busy: validation.starting }
-              : undefined} />
+          <ReadinessCard creative={creative} editing={editing} checks={checks}
+            generation={generationView(editing, eligibility.data, isApiError(eligibility.error) && eligibility.error.kind === 'not_implemented')}
+            actions={can('validation:run') && !disabled && ed.state.kind === 'saved' ? {
+              brief: { onClick: () => void validation.start(creative, 'brief'), busy: validation.startingKind === 'brief' },
+              text: { onClick: () => void validation.start(creative, 'text'), busy: validation.startingKind === 'text', disabled: !creative.caption?.trim() },
+              image: { onClick: () => void validation.start(creative, 'image', gen.assetId), busy: validation.startingKind === 'image', disabled: !gen.assetId },
+            } : {}} />
         )}
         {creative && (
           <VersionHistory creative={creative} current={ed.text} readOnly={disabled || ed.state.kind === 'conflict'}

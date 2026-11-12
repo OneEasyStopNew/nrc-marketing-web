@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, type ReactNode, type ReactElement } from 'react';
 import { VStack } from '@astryxdesign/core/Layout';
 import { Text } from '@astryxdesign/core/Text';
 import { useToast as useAxToast } from '@astryxdesign/core/Toast';
@@ -20,7 +20,7 @@ interface ToastApi {
 const Ctx = createContext<ToastApi | null>(null);
 const normalise = (k: ToastKind | LegacyKind): ToastKind => (k === 'success' ? 'done' : k === 'error' ? 'blocked' : k === 'warning' ? 'waiting' : k);
 
-export function ToastProvider({ children }: { children: ReactNode }) {
+export function ToastProvider({ children }: { children: ReactNode }): ReactElement {
   const ax = useAxToast();
   const toast = useCallback((title: string, kind: ToastKind | LegacyKind = 'done', body?: ReactNode) => {
     const k = normalise(kind);
@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-export function useToast() {
+export function useToast(): ToastApi {
   const c = useContext(Ctx);
   if (!c) throw new Error('useToast must be used within ToastProvider');
   return c;

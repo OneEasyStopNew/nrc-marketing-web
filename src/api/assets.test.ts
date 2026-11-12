@@ -3,7 +3,7 @@ import { manifestForDownload, shortHash, type ExportManifest } from './assets';
 
 const manifest: ExportManifest = {
   status: 'DRAFT', creative_id: 'c1', creative_version: 3, caption: 'Caption', study_snapshot_version: 2,
-  policy_bundle_version: 'p1', latest_validation: null, exported_at: '2026-11-10T00:00:00Z',
+  policy_bundle_version: 1, latest_validation: null, exported_at: '2026-11-10T00:00:00Z',
   image: {
     asset_id: 'a1', creative_id: 'c1', origin: 'generated', mime_type: 'image/png', width_px: 1080, height_px: 1080,
     size_bytes: 10, checksum_sha256: 'abcdef0123456789', provider: 'p', model: 'm', created_at: '2026-11-10T00:00:00Z',

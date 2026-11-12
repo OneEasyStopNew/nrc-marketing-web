@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode, type ReactElement } from 'react';
 import { useAuth, type SignedOutReason } from '@/auth/AuthProvider';
-import { SIMULATION_BUILD } from '@/config/env';
+import { DEVTOKEN_BUILD, SIMULATION_BUILD } from '@/config/env';
 import { Button } from '@/components/ui/Button';
 import { Alert, List, ListItem } from '@/components/ui/Misc';
 import { Card } from '@astryxdesign/core/Card';
@@ -9,7 +9,7 @@ import { Heading, Text } from '@astryxdesign/core/Text';
 import { Icon } from '@/components/ui/Icon';
 import { AuthFrame } from './AuthFrame';
 
-type SimIdentity = { id: string; label: string; sub: string };
+interface SimIdentity { id: string; label: string; sub: string }
 
 /**
  * Dummy identities from the local, git-ignored src/mocks/data.ts, loaded only
@@ -37,7 +37,7 @@ const REASON: Record<Exclude<SignedOutReason, 'none'>, { tone: 'info' | 'waiting
   failed: { tone: 'blocked', text: 'Sign-in did not complete. Try again. If it keeps failing, contact support.' },
 };
 
-export default function SignIn({ reason }: { reason: SignedOutReason }) {
+export default function SignIn({ reason }: { reason: SignedOutReason }): ReactElement {
   const { signIn, mode } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const { list: identities, missing } = useSimIdentities(mode === 'simulation');
@@ -51,6 +51,16 @@ export default function SignIn({ reason }: { reason: SignedOutReason }) {
         <Text type="supporting" color="secondary">Pick a fixture identity. These are not real accounts and nothing here counts as live evidence.</Text>
         {missing && <Alert tone="blocked">No local dummy data. Create <Text type="code">src/mocks/data.ts</Text> (shape in <Text type="code">src/mocks/types.ts</Text>), or switch to Cognito sign-in.</Alert>}
         {r && <Alert tone={r.tone}>{r.text}</Alert>}
+      </>
+    );
+  } else if (DEVTOKEN_BUILD && mode === 'devtoken') {
+    content = (
+      <>
+        <Text type="body" color="secondary" justify="center">Development sign-in against the real Marketing API. The dev server adds the development token to each request; this browser never holds it.</Text>
+        {reason === 'expired'
+          ? <Alert tone="blocked" title="The development token was refused">Put a new DEV_API_TOKEN in .env, restart npm run dev, then continue.</Alert>
+          : r && <Alert tone={r.tone}>{r.text}</Alert>}
+        <Button variant="primary" size="lg" block loading={busy === 'cognito'} onClick={() => go()}>Continue</Button>
       </>
     );
   } else {

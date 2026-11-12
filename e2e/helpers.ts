@@ -155,7 +155,7 @@ export async function auditLayout(page: Page, testInfo: TestInfo, name: string):
     }
     tiny.forEach((s) => issues.push('text under 11px: ' + s));
 
-    const main = (document.querySelector('.app-page-inner') ?? document.querySelector('main .page')) as HTMLElement | null;
+    const main = document.querySelector<HTMLElement>('.app-page-inner') ?? document.querySelector<HTMLElement>('main .page');
     const words = main ? main.innerText.split(/\s+/).filter(Boolean).length : 0;
     return { issues, words, primaries: prim.length };
   }, page.viewportSize()?.width ?? 0);

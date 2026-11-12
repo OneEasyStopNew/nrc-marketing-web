@@ -1,11 +1,11 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type ReactElement } from 'react';
 import { Card } from '@astryxdesign/core/Card';
 import { Center } from '@astryxdesign/core/Center';
-import { HStack, VStack } from '@astryxdesign/core/Layout';
+import { VStack } from '@astryxdesign/core/Layout';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { Icon } from '@/components/ui/Icon';
 import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Misc';
+import { RingLoader } from '@/components/ui/RingLoader';
 
 /**
  * SignIn layout (design-system/components/SignIn.md): a 760px card split into a
@@ -13,7 +13,7 @@ import { Spinner } from '@/components/ui/Misc';
  * above. Used by every screen shown before the signed-in shell, so the user
  * never meets a blank page while the session resolves.
  */
-export function AuthFrame({ title, children, simulation, below }: { title: string; children: ReactNode; simulation?: boolean; below?: ReactNode }) {
+export function AuthFrame({ title, children, simulation, below }: { title: string; children: ReactNode; simulation?: boolean; below?: ReactNode }): ReactElement {
   const heading = useRef<HTMLDivElement>(null);
   // Move focus to the heading so screen readers announce the new state.
   useEffect(() => { heading.current?.focus(); }, [title]);
@@ -45,15 +45,17 @@ export function AuthFrame({ title, children, simulation, below }: { title: strin
 }
 
 /** Whole-screen wait that always says what it is waiting for. */
-export function AuthWait({ label }: { label: string }) {
+export function AuthWait({ label }: { label: string }): ReactElement {
   useEffect(() => { document.title = 'NRC Marketing'; }, []);
   return (
-    <main role="status" aria-live="polite">
+    // aria-busy: the page is still loading (the Astryx Spinner used to say this; the ring is decorative).
+    <main role="status" aria-live="polite" aria-busy="true">
       <Center axis="both" minHeight="100dvh">
-        <HStack gap={3} vAlign="center">
-          <Spinner size="lg" />
-          <Heading level={1}>{label}</Heading>
-        </HStack>
+        <VStack gap={4} hAlign="center">
+          <RingLoader />
+          {/* Light text under the ring; still the page's one heading for screen readers. */}
+          <Text as="h1" type="body" color="secondary" weight="normal">{label}</Text>
+        </VStack>
       </Center>
     </main>
   );

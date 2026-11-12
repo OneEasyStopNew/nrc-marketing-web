@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import { Icon as AxIcon, type IconType } from '@astryxdesign/core/Icon';
 import {
   ArrowDownTrayIcon, ArrowPathIcon, ArrowRightStartOnRectangleIcon, ArrowUpTrayIcon, ArrowsUpDownIcon, AdjustmentsHorizontalIcon,
@@ -29,7 +29,7 @@ export type IconColor = ComponentProps<typeof AxIcon>['color'];
 
 const SIZE = { 16: 'sm', 20: 'md', 22: 'md', 24: 'lg' } as const;
 
-export function Icon({ name, size = 16, color, title }: { name: IconName; size?: 16 | 20 | 22 | 24; color?: IconColor; title?: string }) {
+export function Icon({ name, size = 16, color, title }: { name: IconName; size?: 16 | 20 | 22 | 24; color?: IconColor; title?: string }): ReactElement {
   return <AxIcon icon={ICONS[name]} size={SIZE[size]} color={color} label={title} />;
 }
 

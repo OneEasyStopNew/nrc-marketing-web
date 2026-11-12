@@ -2,8 +2,8 @@
 
 Status: **backend contract published by Dinesh (NRC-2), 9 November 2026.**
 The source of truth is `contracts/openapi.json` in `OneEasyStopNew/nrc-marketing-api` (commit `2c65c7e`).
-`src/api/schema.d.ts` is generated from it; regenerate after every contract change with
-`npx openapi-typescript ../nrc-marketing-api/contracts/openapi.json -o src/api/schema.d.ts`, then run
+`src/api/schemas.gen.ts` (zod schemas and types) is generated from a copy of it in `src/api/openapi.json`; after every contract change copy the new file there and run
+`npm run gen:api`, then run
 `npm run typecheck`. Paths are relative to `/v1/marketing`.
 
 ## Studies, inside `GET /context`

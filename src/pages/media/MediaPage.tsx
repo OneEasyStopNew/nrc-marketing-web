@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput';
 import { DateInput } from '@astryxdesign/core/DateInput';
@@ -23,9 +23,10 @@ import { Icon } from '@/components/ui/Icon';
 import { Alert, EmptyState, PageHeader } from '@/components/ui/Misc';
 import { Drawer, Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
-import { fmtDateTime } from '@/lib/utils';
+import { countOf, fmtDateTime } from '@/lib/utils';
 import { useMedia, useWorkspaceMutation } from '@/pages/shared/queries';
-import { MediaBadge, QueryState, fmtBytes, useIsSimulation } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment, InDevelopmentDialog, MediaBadge, QueryState, fmtBytes, useIsSimulation } from '@/pages/shared/ui';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
 import { Center } from '@astryxdesign/core/Center';
 import { ClickableCard } from '@astryxdesign/core/ClickableCard';
@@ -42,7 +43,7 @@ type Layout = 'grid' | 'table';
  * each came from, its licence and consent. Blocked or expired files cannot be
  * used in a post; the reason is always shown.
  */
-export default function MediaPage() {
+export default function MediaPage(): ReactElement {
   const sim = useIsSimulation();
   const { can } = useAuth();
   const media = useMedia();
@@ -56,7 +57,9 @@ export default function MediaPage() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (media.data ?? []).filter((m) =>
-      (kind === 'all' || m.kind === kind)
+      // NRC-18: video comes later; until then the Videos filter shows the in-development screen.
+      !(IN_DEVELOPMENT.mediaVideo && m.kind === 'video')
+      && (kind === 'all' || m.kind === kind)
       && (status === 'any' || m.status === status)
       && (!q || `${m.name} ${m.tags.join(' ')} ${m.rights.source}`.toLowerCase().includes(q)));
   }, [media.data, search, kind, status]);
@@ -86,9 +89,12 @@ export default function MediaPage() {
             <SegmentedControlItem value="table" label="Table" />
           </SegmentedControl>
         </HStack>
+        {kind === 'video' && IN_DEVELOPMENT.mediaVideo
+          ? <InDevelopment feature="Video" description="Videos in the media library are being built and will be available soon. Images are ready now." />
+          : (
         <QueryState query={media} what="the media library">
           {() => !rows.length
-            ? <EmptyState icon="img" title={search || kind !== 'all' || status !== 'any' ? 'No files match' : 'No media yet'} description={search ? 'Try another search or clear the filters.' : 'Upload images or generate them from a brief.'} />
+            ? <EmptyState icon="img" title={search || kind !== 'all' || status !== 'any' ? 'No files match' : 'No media yet'} description={search ? 'Try another search or clear the filters.' : IN_DEVELOPMENT.mediaUpload ? 'Images generated from a brief appear here.' : 'Upload images or generate them from a brief.'} />
             : layout === 'grid'
               ? (
                 <Grid columns={{ minWidth: 220, repeat: 'fill' }} gap={4}>
@@ -97,11 +103,16 @@ export default function MediaPage() {
               )
               : <Table<MediaAsset> data={rows} columns={mediaColumns((m) => setOpenId(m.asset_id))} idKey="asset_id" density="balanced" dividers="rows" hasHover />}
         </QueryState>
-        <Text type="supporting" color="secondary">{rows.length} of {media.data?.length ?? 0} files{sim ? ' · Simulation: pictures are placeholders.' : ''}</Text>
+          )}
+        {!(kind === 'video' && IN_DEVELOPMENT.mediaVideo) && (
+          <Text type="supporting" color="secondary">{rows.length} of {(media.data ?? []).filter((m) => !(IN_DEVELOPMENT.mediaVideo && m.kind === 'video')).length} files{sim ? ' · Simulation: pictures are placeholders.' : ''}</Text>
+        )}
       </VStack>
 
       {open && <MediaDrawer m={open} onClose={() => setOpenId(null)} />}
-      {uploading && <UploadDialog onClose={() => setUploading(false)} />}
+      {uploading && (IN_DEVELOPMENT.mediaUpload
+        ? <InDevelopmentDialog feature="Upload media" description="Uploading images and videos is being built and will be available soon. Images generated from a brief are ready now." onClose={() => setUploading(false)} />
+        : <UploadDialog onClose={() => setUploading(false)} />)}
     </VStack>
   );
 }
@@ -137,7 +148,7 @@ function mediaColumns(onOpen: (m: MediaAsset) => void): TableColumn<MediaAsset>[
     { key: 'origin', header: 'Origin', width: pixel(120), renderCell: (m) => ({ generated: 'Generated', uploaded: 'Uploaded', stock: 'Stock' })[m.origin] },
     { key: 'size_bytes', header: 'Size', width: pixel(100), renderCell: (m) => fmtBytes(m.size_bytes) },
     { key: 'status', header: 'Status', width: pixel(160), renderCell: (m) => <MediaBadge value={m.status} /> },
-    { key: 'used_in', header: 'Used in', width: pixel(100), renderCell: (m) => `${m.used_in} draft${m.used_in === 1 ? '' : 's'}` },
+    { key: 'used_in', header: 'Used in', width: pixel(100), renderCell: (m) => countOf(m.used_in, 'draft', 'drafts') },
   ];
 }
 
@@ -164,13 +175,16 @@ function MediaDrawer({ m, onClose }: { m: MediaAsset; onClose: () => void }) {
         <MetadataList title="File">
           <MetadataListItem label="Origin">{({ generated: 'Generated', uploaded: 'Uploaded', stock: 'Stock library' })[m.origin]}</MetadataListItem>
           <MetadataListItem label="Added">{m.created_by} · {fmtDateTime(m.created_at)}</MetadataListItem>
-          <MetadataListItem label="Used in">{m.used_in} draft{m.used_in === 1 ? '' : 's'}</MetadataListItem>
+          <MetadataListItem label="Used in">{countOf(m.used_in, 'draft', 'drafts')}</MetadataListItem>
           <MetadataListItem label="Tags">
             {m.tags.length ? <HStack gap={1} wrap="wrap">{m.tags.map((t) => <Token key={t} label={t} size="sm" />)}</HStack> : '—'}
           </MetadataListItem>
         </MetadataList>
       </VStack>
-      <AlertDialog isOpen={confirm} onOpenChange={setConfirm} title="Remove this file?"
+      {confirm && IN_DEVELOPMENT.mediaUpload && (
+        <InDevelopmentDialog feature="Remove from library" description="Removing files from the library is being built and will be available soon." onClose={() => setConfirm(false)} />
+      )}
+      <AlertDialog isOpen={confirm && !IN_DEVELOPMENT.mediaUpload} onOpenChange={setConfirm} title="Remove this file?"
         description={m.used_in > 0 ? 'It is used in a draft, so it cannot be removed until it is taken out of that draft.' : 'It will no longer be available for new posts.'}
         actionLabel="Remove" isActionLoading={archive.isPending}
         onAction={async () => {

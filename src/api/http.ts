@@ -1,5 +1,6 @@
+import type { z } from 'zod';
 import { API_BASE_URL, API_PREFIX } from '@/config/env';
-import { ApiError, type ApiErrorBody } from './errors';
+import { ApiError, ApiErrorBody } from './errors';
 
 /**
  * The only way the app talks to the Marketing API.
@@ -11,6 +12,10 @@ import { ApiError, type ApiErrorBody } from './errors';
  *   produces one token request, not a storm. Still 401 → the session ends.
  * - 403 never signs anyone out: it is a permission answer, shown to the user.
  * - Never logs tokens, request bodies or signed URLs.
+ * - Every response body is checked against a schema (src/api/schemas.gen.ts,
+ *   generated from the backend's OpenAPI) before the app sees it. A body that
+ *   does not match fails here as CONTRACT_MISMATCH, next to its cause, instead
+ *   of crashing a screen later or showing something wrong.
  */
 export interface TokenSource {
   getAccessToken(): string | null;
@@ -35,11 +40,11 @@ const cfg: HttpConfig = {
   tenantId: null,
 };
 
-export function configureHttp(patch: Partial<HttpConfig>) {
+export function configureHttp(patch: Partial<HttpConfig>): void {
   Object.assign(cfg, patch);
 }
 
-export const setTenant = (tenantId: string | null) => configureHttp({ tenantId });
+export const setTenant = (tenantId: string | null): void => configureHttp({ tenantId });
 
 export const TENANT_HEADER = 'X-Tenant-Id';
 
@@ -86,15 +91,23 @@ async function send(method: string, path: string, opts: RequestOptions, token: s
   }
 }
 
-async function read<T>(res: Response): Promise<T> {
-  if (res.status === 204) return undefined as T;
+async function read<S extends z.ZodType>(res: Response, schema: S, what: string): Promise<z.output<S>> {
   const isJson = (res.headers.get('content-type') ?? '').includes('json');
-  const payload: unknown = isJson ? await res.json().catch(() => undefined) : undefined;
+  const payload: unknown = res.status !== 204 && isJson ? await res.json().catch(() => undefined) : undefined;
   if (!res.ok) {
-    const body = payload && typeof payload === 'object' && 'code' in payload ? (payload as ApiErrorBody) : undefined;
-    throw new ApiError(res.status, body);
+    const body = ApiErrorBody.safeParse(payload);
+    throw new ApiError(res.status, body.success ? body.data : undefined);
   }
-  return payload as T;
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    // Only field paths and the expected type are kept: never the response's values.
+    const where = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.') || '(body)'}: ${i.message}`).join('; ');
+    throw new ApiError(res.status, { code: 'CONTRACT_MISMATCH', message: undefined, request_id: res.headers.get('X-Request-Id') }, {
+      kind: 'contract',
+      cause: new Error(`${what} did not match its schema. ${where}`, { cause: parsed.error }),
+    });
+  }
+  return parsed.data;
 }
 
 /** A response body plus the headers the app acts on. */
@@ -105,7 +118,8 @@ export interface ApiResponse<T> {
   status: number;
 }
 
-export async function requestWithMeta<T>(method: string, path: string, opts: RequestOptions = {}): Promise<ApiResponse<T>> {
+/** One API call: the body is checked against `schema` and typed from it. */
+export async function requestWithMeta<S extends z.ZodType>(method: string, path: string, schema: S, opts: RequestOptions = {}): Promise<ApiResponse<z.output<S>>> {
   const tokens = cfg.tokens;
   let res = await send(method, path, opts, tokens?.getAccessToken() ?? null);
   if (res.status === 401 && tokens) {
@@ -113,16 +127,16 @@ export async function requestWithMeta<T>(method: string, path: string, opts: Req
     if (fresh) res = await send(method, path, opts, fresh);
     if (res.status === 401) tokens.onUnauthenticated();
   }
-  return { data: await read<T>(res), etag: res.headers.get('ETag'), status: res.status };
+  return { data: await read(res, schema, `${method} ${path}`), etag: res.headers.get('ETag'), status: res.status };
 }
 
-export async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
-  return (await requestWithMeta<T>(method, path, opts)).data;
+export async function request<S extends z.ZodType>(method: string, path: string, schema: S, opts: RequestOptions = {}): Promise<z.output<S>> {
+  return (await requestWithMeta(method, path, schema, opts)).data;
 }
 
 export const http = {
-  get: <T>(path: string, query?: Query, opts?: RequestOptions) => request<T>('GET', path, { ...opts, query }),
-  post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>('POST', path, { ...opts, body }),
-  patch: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>('PATCH', path, { ...opts, body }),
-  del: <T>(path: string, opts?: RequestOptions) => request<T>('DELETE', path, opts),
+  get: <S extends z.ZodType>(path: string, schema: S, opts?: RequestOptions): Promise<z.output<S>> => request('GET', path, schema, opts),
+  post: <S extends z.ZodType>(path: string, schema: S, body?: unknown, opts?: RequestOptions): Promise<z.output<S>> => request('POST', path, schema, { ...opts, body }),
+  patch: <S extends z.ZodType>(path: string, schema: S, body?: unknown, opts?: RequestOptions): Promise<z.output<S>> => request('PATCH', path, schema, { ...opts, body }),
+  del: <S extends z.ZodType>(path: string, schema: S, opts?: RequestOptions): Promise<z.output<S>> => request('DELETE', path, schema, opts),
 };

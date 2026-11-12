@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { PlatformLogo } from '@/components/ui/PlatformLogo';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { Grid } from '@astryxdesign/core/Grid';
@@ -17,18 +17,29 @@ import { Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
 import { useAccounts, useWorkspaceMutation } from '@/pages/shared/queries';
-import { AccountBadge, QueryState, useIsSimulation } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { AccountBadge, InDevelopment, QueryState, useIsSimulation } from '@/pages/shared/ui';
 
 /**
  * Connected accounts: the Facebook pages and Instagram profiles Marketing may
  * post to, with what each can do and what needs fixing. Tokens never reach
  * the browser; connecting goes through the backend's OAuth flow (simulated here).
  */
-export default function AccountsPage() {
+export default function AccountsPage(): ReactElement {
   const { can } = useAuth();
   const accounts = useAccounts();
   const [connecting, setConnecting] = useState(false);
   const manage = can('publication:manage');
+
+  // NRC-24: connecting social accounts is outside the current demo (config/inDevelopment.ts).
+  if (IN_DEVELOPMENT.accounts) {
+    return (
+      <VStack gap={8}>
+        <PageHeader title="Connected accounts" description="The pages and profiles Marketing may post to. Access tokens stay on the server." />
+        <InDevelopment feature="Connected accounts" description="Connecting Facebook and Instagram accounts is being built and will be available soon." />
+      </VStack>
+    );
+  }
 
   return (
     <VStack gap={8}>
@@ -75,9 +86,11 @@ function AccountCard({ account: a, manage }: { account: SocialAccount; manage: b
         <CardFoot>
           {!healthy && (
             <Button variant="secondary" size="sm" icon="refresh" loading={reconnect.isPending}
-              onClick={async () => {
-                try { await reconnect.mutateAsync([a.account_id]); toast(`${a.name} reconnected`, 'done', sim ? 'Simulation: no real sign-in to Meta happened.' : undefined); }
-                catch (e) { toast(isApiError(e) ? e.message : 'Could not reconnect', 'blocked'); }
+              onClick={() => {
+                void (async () => {
+                  try { await reconnect.mutateAsync([a.account_id]); toast(`${a.name} reconnected`, 'done', sim ? 'Simulation: no real sign-in to Meta happened.' : undefined); }
+                  catch (e) { toast(isApiError(e) ? e.message : 'Could not reconnect', 'blocked'); }
+                })();
               }}>Reconnect</Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => setConfirm(true)}>Disconnect</Button>

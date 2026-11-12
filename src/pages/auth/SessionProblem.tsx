@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { useAuth, type BlockedReason } from '@/auth/AuthProvider';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack } from '@astryxdesign/core/Layout';
@@ -21,7 +22,7 @@ const BLOCKED: Record<BlockedReason, { title: string; text: string }> = {
 };
 
 /** Signed in, but the server will not open Marketing for this account. */
-export function Blocked({ reason }: { reason: BlockedReason }) {
+export function Blocked({ reason }: { reason: BlockedReason }): ReactElement {
   const { signOut, signIn, mode } = useAuth();
   const b = BLOCKED[reason];
   return (
@@ -38,7 +39,7 @@ export function Blocked({ reason }: { reason: BlockedReason }) {
 }
 
 /** Network loss or a server failure while opening the session. Nothing was changed; retry is safe. */
-export function SessionFailed({ message, requestId, retryable }: { message: string; requestId?: string; retryable: boolean }) {
+export function SessionFailed({ message, requestId, retryable }: { message: string; requestId?: string; retryable: boolean }): ReactElement {
   const { retry, signOut, mode } = useAuth();
   return (
     <AuthFrame title="Marketing did not open" simulation={mode === 'simulation'}>
@@ -53,13 +54,13 @@ export function SessionFailed({ message, requestId, retryable }: { message: stri
 }
 
 /** The build is not configured for sign-in. Shown instead of a blank page. */
-export function Misconfigured({ message }: { message: string }) {
+export function Misconfigured({ message }: { message: string }): ReactElement {
   return (
     <AuthFrame title="Sign-in is not set up">
       <Alert tone="blocked">{message}</Alert>
       <Text type="supporting" color="secondary">
         {import.meta.env.DEV
-          ? <>Local development: set the values in <Text type="code">.env.local</Text> (see <Text type="code">.env.example</Text>), or use <Text type="code">VITE_AUTH_MODE=simulation</Text> for dummy data. Restart <Text type="code">npm run dev</Text> afterwards.</>
+          ? <>Local development: set the values in <Text type="code">.env</Text> (see <Text type="code">.env.example</Text>), or use <Text type="code">VITE_AUTH_MODE=simulation</Text> for dummy data. Restart <Text type="code">npm run dev</Text> afterwards.</>
           : 'This is a deployment setting, not something you can fix from here. Tell the Marketing team.'}
       </Text>
     </AuthFrame>

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
-import { Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Route, Routes, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Grid } from '@astryxdesign/core/Grid';
 import { Link } from '@astryxdesign/core/Link';
@@ -28,7 +28,7 @@ import { useApprovals, useWorkspaceMutation } from '@/pages/shared/queries';
 import { QueryState, ReviewBadge, ValidationBadge } from '@/pages/shared/ui';
 
 /** /marketing/approvals (queue) and /marketing/approvals/:id (one review). */
-export default function ApprovalsPage() {
+export default function ApprovalsPage(): ReactElement {
   return (
     <Routes>
       <Route index element={<Queue />} />
@@ -99,7 +99,6 @@ function Review() {
   const { approvalId = '' } = useParams();
   const { context } = useSession();
   const { can } = useAuth();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const req = useQuery({
     queryKey: ['ws', context.tenant.tenant_id, 'approval', approvalId],
@@ -241,7 +240,7 @@ function Review() {
                   status={errors.reason ? { type: 'error', message: errors.reason } : undefined} statusVariant="detached" width="100%" />
               </CardBody>
               <CardFoot>
-                <Button variant="ghost" onClick={() => navigate('/marketing/approvals')}>Back to the queue</Button>
+                <Button variant="ghost" href="/marketing/approvals">Back to the queue</Button>
                 <StackItem size="fill">{null}</StackItem>
                 <Button variant={decision === 'REJECT' ? 'danger' : 'primary'} loading={decide.isPending} disabled={!!blocker} onClick={() => void submit()}>
                   {decision === 'REJECT' ? 'Reject post' : decision === 'REQUEST_CHANGES' ? 'Send back for changes' : 'Record decision'}

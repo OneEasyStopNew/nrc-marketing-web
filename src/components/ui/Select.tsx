@@ -1,4 +1,4 @@
-import { Children, isValidElement, type ChangeEvent, type ReactNode } from 'react';
+import { Children, isValidElement, type ChangeEvent, type ReactNode, type ReactElement } from 'react';
 import { Selector } from '@astryxdesign/core/Selector';
 
 /**
@@ -24,7 +24,7 @@ export interface SelectProps {
   placeholder?: string;
 }
 
-type Option = { value: string; label: string; disabled?: boolean };
+interface Option { value: string; label: string; disabled?: boolean }
 
 function optionsOf(children: ReactNode): { options: Option[]; placeholder?: string } {
   const options: Option[] = [];
@@ -32,7 +32,8 @@ function optionsOf(children: ReactNode): { options: Option[]; placeholder?: stri
   Children.forEach(children, (c) => {
     if (!isValidElement<{ value?: string; children?: ReactNode; disabled?: boolean }>(c)) return;
     const value = String(c.props.value ?? '');
-    const label = Children.toArray(c.props.children).join('');
+    // Option labels are text; anything else in an option is not part of its label.
+    const label = Children.toArray(c.props.children).filter((x): x is string | number => typeof x === 'string' || typeof x === 'number').join('');
     // A disabled empty option is the "Choose…" prompt, not a choice.
     if (value === '' && c.props.disabled) { placeholder = label; return; }
     options.push({ value, label, disabled: c.props.disabled });
@@ -40,7 +41,7 @@ function optionsOf(children: ReactNode): { options: Option[]; placeholder?: stri
   return { options, placeholder };
 }
 
-export function Select({ label, value, onChange, children, help, error, required, info, disabled, searchable, labelHidden, placeholder }: SelectProps) {
+export function Select({ label, value, onChange, children, help, error, required, info, disabled, searchable, labelHidden, placeholder }: SelectProps): ReactElement {
   const { options, placeholder: fromChildren } = optionsOf(children);
   return (
     <>

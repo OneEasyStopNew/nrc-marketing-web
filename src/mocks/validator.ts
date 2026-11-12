@@ -1,7 +1,7 @@
-import type { components } from '@/api/schema';
+import type { Schemas } from '@/api/schemas.gen';
 import type { MockRule } from './types';
 
-type S = components['schemas'];
+type S = Schemas;
 
 /**
  * The pretend validator behind simulation mode. It applies the placeholder

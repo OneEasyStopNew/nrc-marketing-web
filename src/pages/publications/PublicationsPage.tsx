@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
+import { useNow } from '@/lib/useNow';
 import { PlatformLogo } from '@/components/ui/PlatformLogo';
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList';
 import { DateTimeInput, type ISODateTimeString } from '@astryxdesign/core/DateTimeInput';
@@ -22,7 +23,8 @@ import { Drawer, Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
 import { useAccounts, useApprovals, usePublications, useWorkspaceMutation } from '@/pages/shared/queries';
-import { AccountBadge, PublicationBadge, QueryState, relTime, useIsSimulation } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { AccountBadge, InDevelopment, PublicationBadge, QueryState, relTime, useIsSimulation } from '@/pages/shared/ui';
 
 type View = 'upcoming' | 'attention' | 'history';
 
@@ -34,7 +36,7 @@ const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().t
  * with each channel's own result. Simulation never marks anything as live:
  * "publish now" stays queued and nothing reaches Facebook or Instagram.
  */
-export default function PublicationsPage() {
+export default function PublicationsPage(): ReactElement {
   const { can } = useAuth();
   const sim = useIsSimulation();
   const pubs = usePublications();
@@ -49,6 +51,16 @@ export default function PublicationsPage() {
   };
   const columns = useMemo(() => publicationColumns((p) => setOpenId(p.publication_id)), []);
   const open = all.find((p) => p.publication_id === openId);
+
+  // NRC-24: scheduling and publishing are outside the current demo (config/inDevelopment.ts).
+  if (IN_DEVELOPMENT.publications) {
+    return (
+      <VStack gap={8}>
+        <PageHeader title="Publications" description="Schedule approved posts and follow each channel's result." />
+        <InDevelopment feature="Publishing" description="Scheduling approved posts and following each channel's result is being built and will be available soon." />
+      </VStack>
+    );
+  }
 
   return (
     <VStack gap={8}>
@@ -171,6 +183,7 @@ function PublicationDrawer({ pub, onClose }: { pub: Publication; onClose: () => 
 /* ---------- Schedule ---------- */
 
 function ScheduleDialog({ onClose }: { onClose: () => void }) {
+  const now = useNow();
   const { toast } = useToast();
   const sim = useIsSimulation();
   const approvals = useApprovals();
@@ -248,12 +261,12 @@ function ScheduleDialog({ onClose }: { onClose: () => void }) {
           <Grid columns={{ minWidth: 220 }} gap={4}>
             <DateTimeInput label="Date and time" isRequired value={publishAt}
               status={errors.publish_at ? { type: 'error', message: errors.publish_at } : undefined} onChange={(v) => { setPublishAt(v); setErrors((x) => ({ ...x, publish_at: '' })); }}
-              min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16) as ISODateTimeString}
+              min={new Date(now + 5 * 60_000).toISOString().slice(0, 16) as ISODateTimeString}
               description="In the time zone you choose." />
             <Selector label="Time zone" value={timezone} onChange={(v) => v && setTimezone(v)} options={TIMEZONES} width="100%" hasSearch />
           </Grid>
         )}
-        {chosen && <Text type="supporting" color="secondary">Approved by {chosen.decided_by} {chosen.decided_at ? relTime(chosen.decided_at) : ''}. If the draft changes, this schedule stops before sending.</Text>}
+        {chosen && <Text type="supporting" color="secondary">Approved by {chosen.decided_by} {chosen.decided_at ? relTime(chosen.decided_at, now) : ''}. If the draft changes, this schedule stops before sending.</Text>}
       </VStack>
     </Modal>
   );
