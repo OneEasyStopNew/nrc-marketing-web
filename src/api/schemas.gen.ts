@@ -185,6 +185,7 @@ export const CreativeVersionRead = z.object({
   channel: Channel,
   post_format: PostFormat,
   created_by: z.string(),
+  created_by_name: z.string().nullable(),
   created_at: z.iso.datetime({ offset: true }),
 });
 export type CreativeVersionRead = z.infer<typeof CreativeVersionRead>;
@@ -322,6 +323,30 @@ export const MeRead = z.object({
 });
 export type MeRead = z.infer<typeof MeRead>;
 
+/** A finished generated image the caller can see. Uploads are not supported yet. */
+export const MediaItem = z.object({
+  asset_id: z.string(),
+  creative_id: z.string(),
+  creative_version: z.number().int(),
+  origin: AssetOrigin,
+  mime_type: z.string(),
+  width_px: z.number().int(),
+  height_px: z.number().int(),
+  size_bytes: z.number().int(),
+  created_at: z.iso.datetime({ offset: true }),
+  created_by: z.string(),
+  created_by_name: z.string().nullable(),
+  download_url: z.string().nullable(),
+  download_url_expires_at: z.iso.datetime({ offset: true }).nullable(),
+});
+export type MediaItem = z.infer<typeof MediaItem>;
+
+export const MediaPage = z.object({
+  items: z.array(MediaItem),
+  next_cursor: z.iso.datetime({ offset: true }).nullable(),
+});
+export type MediaPage = z.infer<typeof MediaPage>;
+
 /** One rule a creative is validated against. Findings cite rule_id and rule_version. */
 export const PolicyRule = z.object({
   rule_id: z.string(),
@@ -437,6 +462,8 @@ export interface Schemas {
   JobRead: JobRead;
   TenantMembershipRead: TenantMembershipRead;
   MeRead: MeRead;
+  MediaItem: MediaItem;
+  MediaPage: MediaPage;
   PolicyRule: PolicyRule;
   PolicyBundleRead: PolicyBundleRead;
   RuleResultValue: RuleResultValue;

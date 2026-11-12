@@ -39,7 +39,8 @@ const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().t
 export default function PublicationsPage(): ReactElement {
   const { can } = useAuth();
   const sim = useIsSimulation();
-  const pubs = usePublications();
+  // Not fetched while publishing is in development: the backend has no /publications yet.
+  const pubs = usePublications(!IN_DEVELOPMENT.publications);
   const [view, setView] = useState<View>('upcoming');
   const [openId, setOpenId] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);

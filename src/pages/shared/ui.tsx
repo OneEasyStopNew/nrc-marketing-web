@@ -83,7 +83,8 @@ export function StatCard({ label, value, note, action }: {
  * permission answer, or a retryable error; otherwise the content.
  */
 export function QueryState<T>({ query, children, what, empty }: {
-  query: UseQueryResult<T>;
+  /** A query, or a paged (infinite) query: only these fields are read. */
+  query: Pick<UseQueryResult<T>, 'isPending' | 'isError' | 'error' | 'data'> & { refetch: () => Promise<unknown> };
   children: (data: T) => ReactNode;
   /** What is being loaded, in words ("the media library"). */
   what: string;
@@ -108,7 +109,8 @@ export function QueryState<T>({ query, children, what, empty }: {
     );
   }
   if (Array.isArray(query.data) && query.data.length === 0 && empty) return <>{empty}</>;
-  return <>{children(query.data)}</>;
+  // Neither pending nor failed, so the query has its data.
+  return <>{children(query.data as T)}</>;
 }
 
 /** Section heading inside a page, with a hint and optional actions at the end. */

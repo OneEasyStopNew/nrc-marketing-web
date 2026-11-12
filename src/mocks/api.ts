@@ -167,7 +167,8 @@ const ROUTES: Record<string, Handler> = {
     if (denied) return denied;
     const c = find(req);
     if (!c) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
-    const all = [versionOf(c), ...[...(c.history ?? [])].reverse()];
+    // The author's display name is looked up when read, like the API does.
+    const all = [versionOf(c), ...[...(c.history ?? [])].reverse()].map((v) => ({ ...v, created_by_name: displayName(req, v.created_by) }));
     const cursor = req.query.get('cursor');
     const limit = Math.max(1, Math.min(100, Number(req.query.get('limit') ?? 20)));
     const older = cursor ? all.filter((v) => v.version < Number(cursor)) : all;
@@ -350,7 +351,28 @@ const ROUTES: Record<string, Handler> = {
   'GET /media': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
-    return json(200, ws(req).media.map((m) => ({ ...m, preview_url: m.kind === 'image' ? placeholderImage(m.width_px, m.height_px, m.name.replace(/\.[a-z0-9]+$/i, '')) : null })));
+    // As the API: the finished generated images of this tenant's drafts, newest
+    // first, a page at a time (cursor = created_at of the last item seen).
+    const creatives = [...store(req).values()].filter((c) => c.tenant_id === req.tenantId);
+    const finished = [
+      ...req.data.ASSETS.filter((a) => a.tenant_id === req.tenantId).map((a) => ({ a, version: creatives.find((c) => c.asset_id === a.asset_id)?.version })),
+      ...[...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && Date.now() - j.started_ms >= JOB_DONE_MS).map((j) => ({ a: j.asset, version: j.creative_version })),
+    ];
+    const items = finished.flatMap(({ a, version }) => {
+      const c = creatives.find((x) => x.id === a.creative_id);
+      if (!c || version == null) return [];
+      const { download_url, download_url_expires_at } = assetRead(a);
+      return [{
+        asset_id: a.asset_id, creative_id: a.creative_id, creative_version: version, origin: a.origin, mime_type: a.mime_type,
+        width_px: a.width_px, height_px: a.height_px, size_bytes: a.size_bytes, created_at: a.created_at,
+        created_by: c.created_by, created_by_name: displayName(req, c.created_by), download_url, download_url_expires_at,
+      }];
+    }).sort((x, y) => y.created_at.localeCompare(x.created_at));
+    const cursor = req.query.get('cursor');
+    const limit = Math.max(1, Math.min(50, Number(req.query.get('limit') ?? 20)));
+    const older = cursor ? items.filter((m) => m.created_at < cursor) : items;
+    const page = older.slice(0, limit);
+    return json(200, { items: page, next_cursor: older.length > limit ? page[page.length - 1].created_at : null });
   },
 
   'POST /media': (req) => {
@@ -701,8 +723,11 @@ const summaryOf = (r: ValidationRunRead) => ({
 
 const versionOf = (c: MockCreative) => ({
   version: c.version, current_prompt: c.current_prompt, caption: c.caption, study_snapshot_id: c.study_snapshot_id,
-  language: c.language, channel: c.channel, post_format: c.post_format, created_by: c.created_by, created_at: c.updated_at,
+  language: c.language, channel: c.channel, post_format: c.post_format, created_by: c.created_by, created_by_name: null, created_at: c.updated_at,
 });
+
+/** The display name of a user in the simulation, or null when there is none (as the API answers). */
+const displayName = (req: MockRequest, userId: string): string | null => req.data.USERS.find((u) => u.user_id === userId)?.display_name ?? null;
 
 function needCap({ user, tenantId }: MockRequest, cap: Capability) {
   const grant = tenantId ? user.grants[tenantId] : undefined;

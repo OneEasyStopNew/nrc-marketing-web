@@ -200,7 +200,10 @@ export function useGeneration(creative: Creative | undefined): Generation {
     } catch (e) {
       if (!isApiError(e)) throw e;
       if (e.kind === 'not_implemented') toast('Image generation is not available yet', 'waiting', 'The generation service is not connected in this build.');
-      else if (e.code === 'GENERATION_NOT_ELIGIBLE') {
+      // Both codes mean "this version may not be generated": the creatives API
+      // answers GENERATION_NOT_ELIGIBLE, the generation service VALIDATION_NOT_PASSED
+      // (not settled between the two backend branches yet).
+      else if (e.code === 'GENERATION_NOT_ELIGIBLE' || e.code === 'VALIDATION_NOT_PASSED') {
         toast('This version cannot be generated yet', 'waiting', e.message);
         void qc.invalidateQueries({ queryKey: ['eligibility', tenantId, creative.id] });
       } else if (e.kind === 'forbidden') toast('Your role cannot generate images here', 'blocked');

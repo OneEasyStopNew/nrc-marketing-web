@@ -66,9 +66,9 @@ export default function SignIn({ reason }: { reason: SignedOutReason }): ReactEl
   } else {
     content = (
       <>
-        <Text type="body" color="secondary" justify="center">Use your NRC account. Passwords, two-step sign-in and password resets are handled on the NRC sign-in page.</Text>
-        {r && <Alert tone={r.tone}>{r.text}</Alert>}
-        <Button variant="primary" size="lg" block loading={busy === 'cognito'} onClick={() => go()}>Continue to sign in</Button>
+        {/* "Signed out" is already the heading; other reasons (session ended, failed) still say what happened. */}
+        {r && reason !== 'signed_out' && <Alert tone={r.tone}>{r.text}</Alert>}
+        <Button variant="primary" size="lg" block loading={busy === 'cognito'} onClick={() => go()}>Sign in</Button>
       </>
     );
   }

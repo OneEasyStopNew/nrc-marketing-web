@@ -43,7 +43,8 @@ const STATUS_BADGE: Record<Member['status'], { label: string; tone: 'done' | 'wa
  * manages roles inside the tenant.
  */
 export default function TeamPage(): ReactElement {
-  const members = useMembers();
+  // Not fetched while team management is in development: the backend has no /members yet.
+  const members = useMembers(!IN_DEVELOPMENT.team);
   const [filter, setFilter] = useState<Filter>('ACTIVE');
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<Member | 'new' | null>(null);

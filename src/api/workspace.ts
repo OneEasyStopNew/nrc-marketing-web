@@ -247,7 +247,7 @@ const NoContent = z.undefined();
 export interface WorkspaceApi {
   drafts(signal?: AbortSignal): Promise<DraftSummary[]>;
   activity(signal?: AbortSignal): Promise<ActivityItem[]>;
-  media(signal?: AbortSignal): Promise<MediaAsset[]>;
+  // The media list is GET /media in api/assets.ts (in the OpenAPI); upload and remove are still proposals.
   uploadMedia(body: MediaUpload): Promise<MediaAsset>;
   archiveMedia(id: string): Promise<void>;
   rules(signal?: AbortSignal): Promise<PolicyRule[]>;
@@ -274,7 +274,6 @@ export const workspaceApi: WorkspaceApi = {
   drafts: (signal) => http.get('/creatives', z.array(DraftSummarySchema), { signal }),
   activity: (signal) => http.get('/activity', z.array(ActivityItemSchema), { signal }),
 
-  media: (signal) => http.get('/media', z.array(MediaAssetSchema), { signal }),
   uploadMedia: async (body) => (await requestWithMeta('POST', '/media', MediaAssetSchema, { body, idempotencyKey: newKey('media') })).data,
   archiveMedia: async (assetId) => { await http.del(`/media/${id(assetId)}`, NoContent); },
 

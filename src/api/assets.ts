@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, type InfiniteData, type UseInfiniteQueryResult, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import { isApiError } from './errors';
 import { http } from './http';
@@ -12,9 +12,19 @@ import * as S from './schemas.gen';
 
 export type Asset = S.AssetRead;
 export type ExportManifest = S.ExportManifest;
+export type MediaItem = S.MediaItem;
+export type MediaPage = S.MediaPage;
+
+const MEDIA_PAGE_SIZE = 50;
 
 export const assetsApi = {
   get: (assetId: string, signal?: AbortSignal): Promise<Asset> => http.get(`/assets/${encodeURIComponent(assetId)}`, S.AssetRead, { signal }),
+  /** Finished generated images in this tenant, newest first. Uploads are not supported yet. */
+  media: (cursor: string | null, signal?: AbortSignal): Promise<MediaPage> => {
+    const q = new URLSearchParams({ limit: String(MEDIA_PAGE_SIZE) });
+    if (cursor) q.set('cursor', cursor);
+    return http.get(`/media?${q.toString()}`, S.MediaPage, { signal });
+  },
   exportDraft: (creativeId: string, signal?: AbortSignal): Promise<ExportManifest> =>
     http.get(`/creatives/${encodeURIComponent(creativeId)}/export`, S.ExportManifest, { signal }),
 };
@@ -32,6 +42,28 @@ export function useAsset(assetId: string | null | undefined): UseQueryResult<Ass
       const exp = q.state.data?.download_url_expires_at;
       if (!exp) return false;
       return Math.max(30_000, Date.parse(exp) - Date.now() - 60_000);
+    },
+  });
+}
+
+/**
+ * The media library, a page at a time (GET /media). The links in it are
+ * short-lived, so the loaded pages are fetched again shortly before the first
+ * one expires.
+ */
+export function useMediaLibrary(): UseInfiniteQueryResult<InfiniteData<MediaPage, string | null>> {
+  const { context } = useSession();
+  return useInfiniteQuery({
+    // Same key shape as the workspace lists, so useWorkspaceMutation(…, ['media-library']) refreshes it.
+    queryKey: ['ws', context.tenant.tenant_id, 'media-library'],
+    queryFn: ({ pageParam, signal }) => assetsApi.media(pageParam, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    staleTime: 60_000,
+    refetchInterval: (q) => {
+      const ends = (q.state.data?.pages ?? []).flatMap((p) => p.items.map((m) => m.download_url_expires_at)).filter((e): e is string => !!e).map(Date.parse);
+      if (!ends.length) return false;
+      return Math.max(30_000, Math.min(...ends) - Date.now() - 60_000);
     },
   });
 }

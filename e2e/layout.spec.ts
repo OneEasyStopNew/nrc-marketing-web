@@ -48,11 +48,12 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
     await page.locator('li button', { hasText: 'NRC (simulation)' }).click();
     await settle(page);
   } },
-  { name: 'approval-review', open: async (page) => {
+  // One review is not reachable while approvals are in development.
+  ...(IN_DEVELOPMENT.approvals ? [] : [{ name: 'approval-review', open: async (page: Page) => {
     await signInAt(page, '/marketing/approvals/sim-ap-0002', 'reviewer');
     await page.locator('li button', { hasText: 'NRC (simulation)' }).click();
     await settle(page);
-  } },
+  } }]),
   { name: 'publications', open: (page) => signInAt(page, '/marketing/publications', 'publisher') },
   // The schedule dialog is not reachable while publishing is in development.
   ...(IN_DEVELOPMENT.publications ? [] : [{ name: 'publications-schedule', open: async (page: Page) => {

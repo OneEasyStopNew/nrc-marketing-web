@@ -9,6 +9,12 @@ export const IN_DEVELOPMENT = {
   dashboards: true,
   /** Team page, inviting people and changing roles: in no ticket. */
   team: true,
+  /**
+   * The approvals queue and reviewer decisions (NRC-23 full scope): "Formal
+   * approvals" are outside the 13 Nov demo, and the backend has no /approvals
+   * endpoints yet.
+   */
+  approvals: true,
   /** Publications (NRC-24): outside the demo. */
   publications: true,
   /** Connected accounts (NRC-24): outside the demo. */

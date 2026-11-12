@@ -72,7 +72,7 @@ export function VersionHistory({ creative, current, onRestore, readOnly }: {
                 )}
                 description={(
                   <VStack gap={1} hAlign="start">
-                    <Text type="supporting" color="secondary">Saved {fmtDateTime(v.created_at)} by {v.created_by}</Text>
+                    <Text type="supporting" color="secondary">Saved {fmtDateTime(v.created_at)} by {v.created_by_name ?? v.created_by}</Text>
                     <Button size="sm" variant="ghost" icon="eye" onClick={() => setCompare(v)}
                       aria-label={`Compare version ${v.version} with the text now`}>Compare with now</Button>
                   </VStack>

@@ -25,10 +25,20 @@ import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
 import { PostPreview } from '@/pages/create/parts';
 import { useApprovals, useWorkspaceMutation } from '@/pages/shared/queries';
-import { QueryState, ReviewBadge, ValidationBadge } from '@/pages/shared/ui';
+import { InDevelopment, QueryState, ReviewBadge, ValidationBadge } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
 
 /** /marketing/approvals (queue) and /marketing/approvals/:id (one review). */
 export default function ApprovalsPage(): ReactElement {
+  // Formal approvals are outside the current demo (config/inDevelopment.ts).
+  if (IN_DEVELOPMENT.approvals) {
+    return (
+      <VStack gap={8}>
+        <PageHeader title="Approvals" description="Review posts before they can be published. Approval binds to the exact version you see." />
+        <InDevelopment feature="Approvals" description="Reviewing posts and recording approval decisions is being built and will be available soon." />
+      </VStack>
+    );
+  }
   return (
     <Routes>
       <Route index element={<Queue />} />

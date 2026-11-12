@@ -50,6 +50,7 @@ test('each role gets its own dashboard and only its own sections', async ({ page
 });
 
 test('a reviewer approves a passed version, and a reason is required to send one back', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   await asReviewerInNrc(page, '/marketing/approvals');
   await expect(h1(page)).toHaveText('Approvals');
   await page.getByRole('link', { name: 'sim-cr-0005 · version 4' }).click();
@@ -68,6 +69,7 @@ test('a reviewer approves a passed version, and a reason is required to send one
 });
 
 test('nobody can approve their own submission', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   // sim-ap-0002 was submitted by the administrator.
   await signInAt(page, '/marketing/approvals/sim-ap-0002', 'admin');
   await expect(seen(page, 'You submitted this post. Someone else must review it.')).toBeVisible();
@@ -75,6 +77,7 @@ test('nobody can approve their own submission', async ({ page }) => {
 });
 
 test('approve is not offered when validation did not pass', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   await asReviewerInNrc(page, '/marketing/approvals/sim-ap-0005');
   // Already decided: shows the decision, no form.
   await expect(seen(page, 'Remove "guaranteed result" and add the required disclosure.')).toBeVisible();
@@ -179,6 +182,7 @@ test('features that are not planned yet show the in-development screen, not dumm
   // Whole pages. Each is opened directly (simulation signs in again on every load).
   for (const [path, title, feature, on] of [
     ['/marketing/team', 'Team', 'Team management', IN_DEVELOPMENT.team],
+    ['/marketing/approvals', 'Approvals', 'Approvals', IN_DEVELOPMENT.approvals],
     ['/marketing/publications', 'Publications', 'Publishing', IN_DEVELOPMENT.publications],
     ['/marketing/integrations', 'Connected accounts', 'Connected accounts', IN_DEVELOPMENT.accounts],
   ] as const) {

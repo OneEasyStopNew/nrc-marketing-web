@@ -27,7 +27,8 @@ import { AccountBadge, InDevelopment, QueryState, useIsSimulation } from '@/page
  */
 export default function AccountsPage(): ReactElement {
   const { can } = useAuth();
-  const accounts = useAccounts();
+  // Not fetched while connected accounts are in development: the backend has no /accounts yet.
+  const accounts = useAccounts(!IN_DEVELOPMENT.accounts);
   const [connecting, setConnecting] = useState(false);
   const manage = can('publication:manage');
 
