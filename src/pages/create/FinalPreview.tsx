@@ -136,7 +136,7 @@ export default function FinalPreview(): ReactElement {
         </Alert>
       )}
 
-      <TwoColumn>
+      <TwoColumn mainLabel="Post preview" sideLabel="Preview details">
         <section aria-label="Post preview"><VStack gap={4}>
           {assetId && asset.isPending
             ? <Card><SkeletonRows rows={6} /></Card>

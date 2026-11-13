@@ -139,7 +139,9 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
   const unsaved = !disabled && (ed.dirty || ed.state.kind === 'saving' || ed.state.kind === 'failed' || ed.state.kind === 'conflict');
 
   return (
-    <TwoColumn>
+    // The post and the preview/checks scroll separately on wide screens: on a new post the
+    // preview stays in view while the form scrolls.
+    <TwoColumn mainLabel="Post" sideLabel="Preview and checks">
       <Card>
         {(!!readOnly || ed.state.kind === 'failed' || (ed.state.kind === 'conflict' && !conflictOpen)) && (
           <VStack gap={3}>

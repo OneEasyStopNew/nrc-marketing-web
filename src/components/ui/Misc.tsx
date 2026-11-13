@@ -1,5 +1,6 @@
-import { Children, type ReactNode, type ReactElement } from 'react';
+import { Children, useLayoutEffect, useRef, useState, type ReactNode, type ReactElement, type RefObject } from 'react';
 import { useMediaQuery } from '@astryxdesign/core/hooks';
+import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout';
 import { Avatar as AxAvatar } from '@astryxdesign/core/Avatar';
 import { Badge as AxBadge } from '@astryxdesign/core/Badge';
 import { Banner } from '@astryxdesign/core/Banner';
@@ -236,9 +237,38 @@ export function PageHeader({ crumbs, title, description, actions, badge, info }:
  * stacked on narrow ones. The first child is the main column, the second the
  * side column; anything after (dialogs) renders as is.
  */
-export function TwoColumn({ children }: { children: ReactNode }): ReactElement {
+export function TwoColumn({ children, scrollSeparately = true, mainLabel, sideLabel }: {
+  children: ReactNode;
+  /**
+   * Wide screens only: the two columns scroll on their own (Astryx Layout with
+   * LayoutContent and an end LayoutPanel), sized to the space left on screen.
+   * The side column stays put while the main one scrolls, and gets its own
+   * scroll only when its content is taller than the screen.
+   */
+  scrollSeparately?: boolean;
+  /** Names of the two scroll regions for screen readers. */
+  mainLabel?: string;
+  sideLabel?: string;
+}): ReactElement {
   const narrow = useMediaQuery('(max-width: 1100px)');
   const [main, side, ...rest] = Children.toArray(children);
+  const split = scrollSeparately && !narrow;
+  const { ref, height } = useFillHeight(split);
+  if (split) {
+    return (
+      <>
+        <VStack ref={ref} height={height ?? undefined}>
+          <Layout height="fill" padding={0}
+            // data-plain-scroll: no visible scrollbar boxes (the one rule in src/index.css).
+            // tabIndex 0: each column scrolls on its own, so keyboard users can focus it and scroll
+            // with the arrow keys even when it holds no button or link (axe scrollable-region-focusable).
+            content={<LayoutContent padding={0} label={mainLabel} data-plain-scroll="" tabIndex={0}>{main}</LayoutContent>}
+            end={<LayoutPanel width={424} padding={0} label={sideLabel} data-plain-scroll="" tabIndex={0}><VStack paddingInlineStart={6}>{side}</VStack></LayoutPanel>} />
+        </VStack>
+        {rest}
+      </>
+    );
+  }
   return (
     <>
       {narrow
@@ -252,4 +282,45 @@ export function TwoColumn({ children }: { children: ReactNode }): ReactElement {
       {rest}
     </>
   );
+}
+
+/** Space under the page content's bottom padding (the page stack's padding step 6). */
+const PAGE_BOTTOM_GAP = 24;
+/** Never squeeze the two columns below this, even on a very short window. */
+const MIN_SPLIT_HEIGHT = 360;
+
+/** The nearest ancestor that scrolls vertically: the app's content area. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY;
+    if (y === 'auto' || y === 'scroll') return p;
+  }
+  return null;
+}
+
+/**
+ * The height from the top of the element to the bottom of the app's content
+ * area, so a fill Layout placed there ends exactly at the screen's usable
+ * bottom. Measured by a ResizeObserver (its first callback runs right after
+ * observe), and again whenever the window or the content area changes size.
+ */
+function useFillHeight(on: boolean): { ref: RefObject<HTMLElement | null>; height: number | null } {
+  const ref = useRef<HTMLElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!on || !el) return;
+    const area = scrollParent(el);
+    const measure = (): void => {
+      const bottom = area ? area.getBoundingClientRect().bottom : window.innerHeight;
+      // Where the element would start with the content area scrolled to the top.
+      const top = el.getBoundingClientRect().top + (area?.scrollTop ?? 0);
+      setHeight(Math.max(MIN_SPLIT_HEIGHT, Math.floor(bottom - top - PAGE_BOTTOM_GAP)));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(area ?? document.documentElement);
+    window.addEventListener('resize', measure);
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure); };
+  }, [on]);
+  return { ref, height: on ? height : null };
 }
