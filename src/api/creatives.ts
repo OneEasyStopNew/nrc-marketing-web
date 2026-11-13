@@ -88,6 +88,14 @@ export const textOf = (c: Creative): BriefText => ({ prompt: c.current_prompt, c
 /** A new key per intended save; the same key when retrying the same save. 8–128 of [A-Za-z0-9_-]. */
 export const newIdempotencyKey = (): string => `create_${crypto.randomUUID().replace(/-/g, '')}`;
 
+/** One place for a draft's query keys, so pages and every invalidation agree. Tenant-scoped. */
+export const creativeKeys = {
+  /** The draft page (`/marketing/create/:id`). */
+  detail: (tenantId: string, creativeId: string) => ['creative', tenantId, creativeId] as const,
+  /** The final preview (`/marketing/create/:id/preview`), kept apart from the draft page's copy. */
+  preview: (tenantId: string, creativeId: string) => ['creative-preview', tenantId, creativeId] as const,
+};
+
 /** The Creatives endpoints. Every response is checked against its schema. */
 export interface CreativesApi {
   list(signal?: AbortSignal): Promise<CreativeSummary[]>;

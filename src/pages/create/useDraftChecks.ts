@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { skipToken, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 import { useSession } from '@/auth/AuthProvider';
-import { useAsset, useDraftExport, type Asset } from '@/api/assets';
-import { creativesApi, currentValidation, latestValidation, type Creative, type GenerationEligibility, type ValidationKind, type ValidationRunSummary } from '@/api/creatives';
+import { assetKeys, useAsset, useDraftExport, type Asset } from '@/api/assets';
+import { creativeKeys, creativesApi, currentValidation, latestValidation, type Creative, type GenerationEligibility, type ValidationKind, type ValidationRunSummary } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
 import { isJobDone, isJobUnsettled, isUuid, jobKeys, jobsApi, newJobKey, type Job } from '@/api/jobs';
 import { isInProgress } from '@/api/validations';
@@ -199,19 +199,27 @@ export function useGeneration(creative: Creative | undefined): Generation {
   const unsettled = forCurrent && isJobUnsettled(job.state);
   const pollingStopped = forCurrent && jobPollingExpired(job, jobQ.dataUpdatedAt);
 
+  const succeededJobId = forCurrent && job.state === 'SUCCEEDED' ? job.job_id : null;
   const pkg = useDraftExport(creative && !creative.asset_id ? creative.id : undefined, creative?.version);
-  const assetId = creative?.asset_id
-    ?? (forCurrent && job.state === 'SUCCEEDED' ? job.result_asset_id : null)
+  // The image this tab just generated wins over the draft's `asset_id`: the composer keeps
+  // the draft as it was loaded or last saved, so after a regeneration that field still
+  // names the previous image until a reload. The API also names the newest image of the
+  // version there, so both agree once the draft is read again.
+  const assetId = (succeededJobId ? job?.result_asset_id : null)
+    ?? creative?.asset_id
     ?? pkg.data?.image.asset_id
     ?? null;
   const asset = useAsset(assetId);
 
-  const succeeded = forCurrent && job.state === 'SUCCEEDED';
   const creativeId = creative?.id;
+  // Once per finished job (the API stores the image in the same commit as SUCCEEDED): the
+  // review package and the final preview's copy of the draft name the old image or none.
+  // The preview's copy is dropped, not just marked stale, so it never shows the old image first.
   useEffect(() => {
-    if (!succeeded) return;
-    void qc.invalidateQueries({ queryKey: ['draft-export', tenantId, creativeId] });
-  }, [succeeded, qc, tenantId, creativeId]);
+    if (!succeededJobId || !creativeId) return;
+    void qc.invalidateQueries({ queryKey: assetKeys.draftExports(tenantId, creativeId) });
+    qc.removeQueries({ queryKey: creativeKeys.preview(tenantId, creativeId) });
+  }, [succeededJobId, qc, tenantId, creativeId]);
 
   /**
    * Starts a job for the current version. One Idempotency-Key per intended

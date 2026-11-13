@@ -85,6 +85,27 @@ test('a double click starts one job, with a UUID like the API issues', async ({ 
   expect(ids[0]).toMatch(UUID);
 });
 
+/** Checksums of the images the fake API's jobs made in this tab, in order, as the preview shortens them. */
+const jobChecksums = (page: Page) =>
+  page.evaluate(() => (JSON.parse(sessionStorage.getItem('nrc.sim.jobs') ?? '[]') as { asset: { checksum_sha256: string } }[])
+    .map((j) => j.asset.checksum_sha256.slice(0, 12)));
+
+test('a new image replaces the earlier one as soon as it is ready, without a reload', async ({ page }) => {
+  // The seeded draft already names an image, as any draft with an earlier generation does.
+  await signInAt(page, SEEDED, 'creator');
+  const shownChecksum = seen(page, /Checksum [0-9a-f]{12}/).first();
+  await expect(shownChecksum).toBeVisible();
+  const before = await shownChecksum.textContent();
+
+  await page.getByRole('button', { name: 'Generate a new image' }).click();
+  await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
+  await expect.poll(() => jobChecksums(page)).toHaveLength(1);
+  const [made] = await jobChecksums(page);
+  // The picture looks the same in simulation; the preview's checksum says which image it is.
+  await expect(seen(page, new RegExp(`Checksum ${made}`)).first()).toBeVisible({ timeout: 15_000 });
+  expect(before).not.toContain(made);
+});
+
 test('a tampered job reference in this tab is ignored, and Generate stays available', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
   await expect(generate(page)).toBeEnabled();

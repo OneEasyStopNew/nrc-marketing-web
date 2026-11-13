@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { useAuth, useSession } from '@/auth/AuthProvider';
 import { assetDenied, assetKeys, assetsApi, manifestForDownload, useAsset, useDraftExport } from '@/api/assets';
-import { creativesApi, latestValidation } from '@/api/creatives';
+import { creativeKeys, creativesApi, latestValidation } from '@/api/creatives';
 import { http } from '@/api/http';
 import { isApiError } from '@/api/errors';
 import { isInProgress, passedAssessedChecks } from '@/api/validations';
@@ -45,7 +45,7 @@ export default function FinalPreview(): ReactElement {
   const qc = useQueryClient();
   const { toast } = useToast();
   const q = useQuery({
-    queryKey: ['creative-preview', context.tenant.tenant_id, creativeId],
+    queryKey: creativeKeys.preview(context.tenant.tenant_id, creativeId),
     queryFn: ({ signal }) => creativesApi.get(creativeId, signal),
     staleTime: 0,
   });

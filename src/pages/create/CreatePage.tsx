@@ -4,7 +4,7 @@ import { VStack } from '@astryxdesign/core/Layout';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
-import { creativesApi, type Versioned } from '@/api/creatives';
+import { creativeKeys, creativesApi, type Versioned } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHead } from '@/components/ui/Card';
@@ -87,7 +87,7 @@ function ExistingDraft() {
   const fromCreate = handed?.creative.id === creativeId ? handed : undefined;
 
   const q = useQuery({
-    queryKey: ['creative', context.tenant.tenant_id, creativeId],
+    queryKey: creativeKeys.detail(context.tenant.tenant_id, creativeId),
     queryFn: ({ signal }) => creativesApi.get(creativeId, signal),
     enabled: !fromCreate,
     staleTime: 0,

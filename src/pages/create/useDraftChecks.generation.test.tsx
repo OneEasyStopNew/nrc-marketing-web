@@ -5,7 +5,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http as mock, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import type { Creative } from '@/api/creatives';
+import { creativeKeys, type Creative } from '@/api/creatives';
 import { configureHttp } from '@/api/http';
 import { SLOW_POLL_MS } from './generationRules';
 import { useGeneration } from './useDraftChecks';
@@ -25,13 +25,18 @@ const toast = vi.fn();
 vi.mock('@/auth/AuthProvider', () => ({ useSession: () => ({ context: { tenant: { tenant_id: TENANT } } }) }));
 vi.mock('@/components/ui/Toast', () => ({ useToast: () => ({ toast }) }));
 // The image lookups are not under test; they answer "no image yet".
-vi.mock('@/api/assets', () => ({
+vi.mock('@/api/assets', async (actual) => ({
+  ...(await actual<typeof import('@/api/assets')>()),
   useAsset: () => ({ data: undefined, isPending: false }),
   useDraftExport: () => ({ data: undefined, isPending: false }),
 }));
 
 // Test fixture: the hook reads only id, version and asset_id of a draft.
 const CREATIVE = { id: 'sim-cr-0001', version: 3, asset_id: null } as unknown as Creative;
+const OLD_ASSET = '0a1b2c3d-1111-4aaa-8bbb-000000000001';
+const NEW_ASSET = '0a1b2c3d-2222-4aaa-8bbb-000000000002';
+// Test fixture: the same draft after an earlier generation, as the page loaded it.
+const WITH_OLD_IMAGE = { ...CREATIVE, asset_id: OLD_ASSET } as Creative;
 
 const jobBody = (patch: Record<string, unknown> = {}) => ({
   job_id: JOB_ID,
@@ -245,6 +250,42 @@ describe('useGeneration: reading the job', () => {
     const reads = jobReads;
     await act(() => vi.advanceTimersByTimeAsync(5 * 60_000));
     expect(jobReads).toBe(reads);
+  });
+
+  it('shows the new image as soon as a regeneration succeeds, without a reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    sessionStorage.setItem(STORE_KEY, JSON.stringify({ job_id: JOB_ID, version: 3 }));
+    readAnswers(
+      () => HttpResponse.json(jobBody()),
+      () => HttpResponse.json(jobBody({ state: 'SUCCEEDED', stage: 'stored', result_asset_id: NEW_ASSET })),
+    );
+    // The draft as the page loaded it: it still names the image from before.
+    const { result } = renderHook(() => useGeneration(WITH_OLD_IMAGE), { wrapper });
+    await waitFor(() => expect(result.current.active).toBe(true));
+    expect(result.current.assetId).toBe(OLD_ASSET);
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    await waitFor(() => expect(result.current.job?.state).toBe('SUCCEEDED'));
+    expect(result.current.assetId).toBe(NEW_ASSET);
+  });
+
+  it('keeps the draft image when the succeeded job was for an older version', async () => {
+    sessionStorage.setItem(STORE_KEY, JSON.stringify({ job_id: JOB_ID, version: 2 }));
+    readAnswers(() => HttpResponse.json(jobBody({ creative_version: 2, state: 'SUCCEEDED', stage: 'stored', result_asset_id: NEW_ASSET })));
+    const { result } = renderHook(() => useGeneration(WITH_OLD_IMAGE), { wrapper });
+    await waitFor(() => expect(jobReads).toBe(1));
+    expect(result.current.assetId).toBe(OLD_ASSET);
+  });
+
+  it('drops the cached final preview of the draft when a job succeeds, so it reads the new image', async () => {
+    sessionStorage.setItem(STORE_KEY, JSON.stringify({ job_id: JOB_ID, version: 3 }));
+    readAnswers(() => HttpResponse.json(jobBody({ state: 'SUCCEEDED', stage: 'stored', result_asset_id: NEW_ASSET })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const previewKey = creativeKeys.preview(TENANT, CREATIVE.id);
+    client.setQueryData(previewKey, { creative: WITH_OLD_IMAGE });
+    renderHook(() => useGeneration(CREATIVE), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    await waitFor(() => expect(client.getQueryData(previewKey)).toBeUndefined());
   });
 
   it('forgets a job the API no longer knows', async () => {
