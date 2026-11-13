@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { stagingLabel } from '@/lib/utils';
 import { http } from './http';
 import * as S from './schemas.gen';
 
@@ -94,7 +95,7 @@ export const sessionApi = {
       username: w.username,
       display_name: profile.name || profile.email || w.username,
       email: profile.email,
-      tenants: w.memberships.map((m) => ({ tenant_id: m.tenant_id, name: m.tenant_name })),
+      tenants: w.memberships.map((m) => ({ tenant_id: m.tenant_id, name: stagingLabel(m.tenant_name) })),
     };
   },
 
@@ -102,13 +103,13 @@ export const sessionApi = {
   context: async (signal?: AbortSignal): Promise<MarketingContext> => {
     const w = await http.get('/context', ContextWireSchema, { signal });
     return {
-      tenant: { tenant_id: w.tenant_id, name: w.tenant_name },
+      tenant: { tenant_id: w.tenant_id, name: stagingLabel(w.tenant_name) },
       roles: w.roles,
       capabilities: w.capabilities,
-      studies: w.studies,
+      studies: w.studies.map((study) => ({ ...study, study_title: stagingLabel(study.study_title) })),
       languages: w.languages,
       post_formats: w.post_formats,
-      active_policy: w.active_policy ?? null,
+      active_policy: w.active_policy ? { ...w.active_policy, name: stagingLabel(w.active_policy.name) } : null,
     };
   },
 };
