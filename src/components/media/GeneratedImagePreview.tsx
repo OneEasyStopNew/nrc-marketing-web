@@ -6,7 +6,7 @@ import { Section } from '@astryxdesign/core/Section';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Text } from '@astryxdesign/core/Text';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
-import { assetDenied, isSimulatedAsset, shortHash, useAsset, type Asset } from '@/api/assets';
+import { assetDenied, isPlaceholderImage, shortHash, useAsset, type Asset } from '@/api/assets';
 import { isApiError } from '@/api/errors';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -22,7 +22,12 @@ import { initialRenewal, renewalStep } from './imageRenewal';
  * When the browser cannot draw it (usually an expired link) it fetches a fresh
  * link once; see imageRenewal.ts.
  */
-export function GeneratedImagePreview({ assetId, alt, ratio = 1, provenance = true }: {
+export function GeneratedImagePreview({
+  assetId,
+  alt,
+  ratio = 1,
+  provenance = true,
+}: {
   assetId: string;
   /** What the image shows, e.g. from `imageAltForBrief`; never where it came from. */
   alt: string;
@@ -35,7 +40,17 @@ export function GeneratedImagePreview({ assetId, alt, ratio = 1, provenance = tr
   return <ImagePreview key={assetId} assetId={assetId} alt={alt} ratio={ratio} provenance={provenance} />;
 }
 
-function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; alt: string; ratio: number; provenance: boolean }): ReactElement {
+function ImagePreview({
+  assetId,
+  alt,
+  ratio,
+  provenance,
+}: {
+  assetId: string;
+  alt: string;
+  ratio: number;
+  provenance: boolean;
+}): ReactElement {
   const asset = useAsset(assetId);
   const [renewal, dispatch] = useReducer(renewalStep, initialRenewal);
   const [fullSize, setFullSize] = useState(false);
@@ -58,44 +73,84 @@ function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; al
 
   const denied = assetDenied(asset.error);
   const data = denied ? undefined : asset.data;
-  const fullAlt = data && isSimulatedAsset(data) ? `${alt} (simulation placeholder)` : alt;
+  const fullAlt = data && isPlaceholderImage(data) ? `${alt} (placeholder picture)` : alt;
   const unavailable = isApiError(asset.error) && asset.error.kind === 'unavailable';
-  const tryAgain = (): void => { if (renewal.phase === 'failed') void renew('retry'); else void refetch(); };
+  const tryAgain = (): void => {
+    if (renewal.phase === 'failed') void renew('retry');
+    else void refetch();
+  };
 
   const drawing = !!data?.download_url && !asset.isPending && (renewal.phase === 'loading' || renewal.phase === 'shown');
   let frame;
   if (denied) {
-    frame = <Notice icon="lock" title="Image not available" text="It does not exist, or it is not available to you in this organisation." />;
+    frame = (
+      <Notice icon="lock" title="Image not available" text="It does not exist, or it is not available to you in this organisation." />
+    );
   } else if (asset.isPending || renewal.phase === 'renewing') {
-    frame = <div aria-hidden data-loading=""><Skeleton height="100%" radius="none" /></div>;
+    frame = (
+      <div aria-hidden data-loading="">
+        <Skeleton height="100%" radius="none" />
+      </div>
+    );
   } else if (renewal.phase === 'failed' || !data?.download_url) {
-    frame = unavailable
-      ? <Notice icon="warn" title="The image is temporarily unavailable" text="Image storage did not answer. Try again in a minute; the rest of the draft is unchanged." action={tryAgain} />
-      : <Notice icon="warn" title="The image could not be shown" text="Its link could not be renewed. Try again; the rest of the draft is unchanged." action={tryAgain} />;
+    frame = unavailable ? (
+      <Notice
+        icon="warn"
+        title="The image is temporarily unavailable"
+        text="Image storage did not answer. Try again in a minute; the rest of the draft is unchanged."
+        action={tryAgain}
+      />
+    ) : (
+      <Notice
+        icon="warn"
+        title="The image could not be shown"
+        text="Its link could not be renewed. Try again; the rest of the draft is unchanged."
+        action={tryAgain}
+      />
+    );
   } else {
     // The attempt key draws a fresh <img> for every renewed link, even when the link text is unchanged.
     frame = (
-      <img key={renewal.attempt} src={data.download_url} alt={fullAlt}
-        onLoad={() => dispatch({ type: 'loaded' })} onError={() => void renew('load_failed')} />
+      <img
+        key={renewal.attempt}
+        src={data.download_url}
+        alt={fullAlt}
+        onLoad={() => dispatch({ type: 'loaded' })}
+        onError={() => void renew('load_failed')}
+      />
     );
   }
 
   // One region, mounted for the component's life: a live region that appears already filled is not announced.
-  const status = denied ? 'Image not available'
-    : asset.isPending ? 'Loading the image'
-    : renewal.phase === 'renewing' ? 'Renewing the image link'
-    : renewal.phase === 'failed' || !data?.download_url ? (unavailable ? 'The image is temporarily unavailable' : 'The image could not be shown')
-    : '';
+  const status = denied
+    ? 'Image not available'
+    : asset.isPending
+      ? 'Loading the image'
+      : renewal.phase === 'renewing'
+        ? 'Renewing the image link'
+        : renewal.phase === 'failed' || !data?.download_url
+          ? unavailable
+            ? 'The image is temporarily unavailable'
+            : 'The image could not be shown'
+          : '';
 
   return (
     <>
-      <VisuallyHidden><span role="status" aria-live="polite" data-image-status="">{status}</span></VisuallyHidden>
-      <AspectRatio ratio={ratio} fit={drawing ? 'cover' : undefined}>{frame}</AspectRatio>
+      <VisuallyHidden>
+        <span role="status" aria-live="polite" data-image-status="">
+          {status}
+        </span>
+      </VisuallyHidden>
+      <AspectRatio ratio={ratio} fit={drawing ? 'cover' : undefined}>
+        {frame}
+      </AspectRatio>
       {data && drawing && renewal.phase === 'shown' && (
         <Section variant="transparent" padding={4}>
           <HStack gap={3} vAlign="center" wrap="wrap">
             <StackItem size="fill">{provenance ? <AssetProvenance asset={data} /> : null}</StackItem>
-            <Button variant="ghost" size="sm" icon="eye" onClick={() => setFullSize(true)}>Open full size</Button>
+            <Button variant="ghost" size="sm" icon="eye" onClick={() => setFullSize(true)}>
+              Open full size
+            </Button>
           </HStack>
         </Section>
       )}
@@ -112,22 +167,28 @@ function ImagePreview({ assetId, alt, ratio, provenance }: { assetId: string; al
 
 /** Where the image came from, its size and time, and a short checksum. Always a draft for review. */
 export function AssetProvenance({ asset }: { asset: Asset }): ReactElement {
-  const simulated = isSimulatedAsset(asset);
+  const placeholder = isPlaceholderImage(asset);
   return (
     <VStack gap={1}>
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Badge>Draft for review</Badge>
-        {simulated
-          ? <Badge variant="waiting">Simulation, not a real generated image</Badge>
-          : (
-            <Text type="body">
-              {asset.origin === 'generated' ? 'Generated' : 'Uploaded'}
-              {asset.provider && <> by {asset.provider}{asset.model && ` (${asset.model})`}</>}
-            </Text>
-          )}
+        {placeholder ? (
+          <Badge variant="waiting">Placeholder picture, not a generated image</Badge>
+        ) : (
+          <Text type="body">
+            {asset.origin === 'generated' ? 'Generated' : 'Uploaded'}
+            {asset.provider && (
+              <>
+                {' '}
+                by {asset.provider}
+                {asset.model && ` (${asset.model})`}
+              </>
+            )}
+          </Text>
+        )}
       </HStack>
       <Text type="supporting" color="secondary">
-        {simulated && `${asset.origin === 'generated' ? 'Generated' : 'Uploaded'} · `}
+        {placeholder && `${asset.origin === 'generated' ? 'Generated' : 'Uploaded'} · `}
         {asset.width_px}×{asset.height_px} · {fmtDateTime(asset.created_at)} · Checksum {shortHash(asset.checksum_sha256)}
       </Text>
     </VStack>
@@ -139,9 +200,17 @@ function Notice({ icon, title, text, action }: { icon: IconName; title: string; 
     <Center axis="both" height="100%" padding={6}>
       <VStack gap={2} hAlign="center">
         <Icon name={icon} size={24} color="secondary" />
-        <Text type="body" weight="semibold" justify="center">{title}</Text>
-        <Text type="supporting" color="secondary" justify="center">{text}</Text>
-        {action && <Button variant="secondary" size="sm" icon="refresh" onClick={action}>Try again</Button>}
+        <Text type="body" weight="semibold" justify="center">
+          {title}
+        </Text>
+        <Text type="supporting" color="secondary" justify="center">
+          {text}
+        </Text>
+        {action && (
+          <Button variant="secondary" size="sm" icon="refresh" onClick={action}>
+            Try again
+          </Button>
+        )}
       </VStack>
     </Center>
   );

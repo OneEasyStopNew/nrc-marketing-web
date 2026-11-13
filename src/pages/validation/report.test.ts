@@ -28,7 +28,7 @@ function makeRun(overrides: Partial<ValidationRun> = {}): ValidationRun {
     input_hash: INPUT_HASH,
     asset_id: null,
     study_snapshot_version: 2,
-    policy_bundle_version: 'policy-bundle-synthetic-1',
+    policy_bundle_version: 1,
     gates: [
       { gate: 'completeness', outcome: 'PASS' },
       { gate: 'policy', outcome: 'FAIL' },
@@ -91,7 +91,6 @@ function hostileInput(): ValidationReportInput {
   const run: ValidationRun = {
     ...base,
     validation_run_id: `${RUN_ID}${HOSTILE}`,
-    policy_bundle_version: HOSTILE,
     asset_id: HOSTILE,
     rule_results: [{ rule_id: HOSTILE, rule_version: 1, mandatory: true, result: 'FAIL', reason: HOSTILE }],
     findings: [
@@ -168,7 +167,7 @@ describe('buildValidationReport: structure', () => {
     expect(doc).toContain('<meta charset="utf-8">');
     expect(doc).toContain('<meta name="referrer" content="no-referrer">');
     const order = ['Draft for review', 'Summary', 'Outcome', 'Gates', 'Rule results', 'Findings', 'Coverage gaps'];
-    const positions = order.map((s) => doc.indexOf(`>${s}`) >= 0 ? doc.indexOf(`>${s}`) : doc.indexOf(s));
+    const positions = order.map((s) => (doc.includes(`>${s}`) ? doc.indexOf(`>${s}`) : doc.indexOf(s)));
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
@@ -221,7 +220,7 @@ describe('buildValidationReport: content', () => {
     expect(doc).toContain('Synthetic Org');
     expect(doc).toContain('Synthetic study · snapshot version 2');
     expect(doc).not.toContain('draft uses snapshot version');
-    expect(doc).toContain('policy-bundle-synthetic-1');
+    expect(doc).toContain('Policy bundle</th><td class="evidence">version 1');
     expect(doc).toContain('creative-1 · version 3');
     expect(doc).toContain('asset-9 · reference abcdef012345');
     expect(doc).not.toContain(CHECKSUM);
@@ -314,10 +313,10 @@ describe('buildValidationReport: content', () => {
   });
 
   it('survives unexpected enum values from the server', () => {
-    // JSON.parse returns any, so a server value outside the enums can be modelled without a cast.
-    const odd: ValidationRun = JSON.parse(
+    // Values outside the enums reach the builder only through a cast: this models a server that breaks the contract.
+    const odd = JSON.parse(
       JSON.stringify({ ...makeRun(), state: 'constructor', input_kind: 'toString', outcome: 'hasOwnProperty' }),
-    );
+    ) as ValidationRun;
     expect(() => buildValidationReport(makeInput({ run: odd }))).not.toThrow();
   });
 });
@@ -373,7 +372,7 @@ describe('buildValidationReport: escaping', () => {
   });
 
   it('keeps the title element well formed', () => {
-    const title = doc.match(/<title>([^<]*)<\/title>/);
+    const title = /<title>([^<]*)<\/title>/.exec(doc);
     expect(title).not.toBeNull();
   });
 });

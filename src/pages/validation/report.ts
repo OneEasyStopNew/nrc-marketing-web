@@ -10,7 +10,7 @@ import {
   type ValidationInputKind,
   type ValidationRun,
 } from '@/api/validations';
-import type { components } from '@/api/schema';
+import type { RuleResultValue } from '@/api/schemas.gen';
 
 /**
  * Downloadable validation evidence report (NRC-30). Pure: input in, one
@@ -20,8 +20,6 @@ import type { components } from '@/api/schema';
  * tokens. Nothing from the data is ever rendered as a link, script or
  * attribute; every value goes through `html`, which escapes by default.
  */
-
-type RuleResultValue = components['schemas']['RuleResultValue'];
 
 export interface ValidationReportInput {
   run: ValidationRun;
@@ -206,7 +204,7 @@ function summary(input: ValidationReportInput): SafeHtml {
 ${row('Organisation', input.tenantName)}
 ${row('Status of this result', isCurrent ? 'Current result for this draft version' : 'Historical result, not current')}
 ${row('Study', describeStudy(input))}
-${row('Policy bundle version', run.policy_bundle_version ?? NOT_REPORTED)}
+${row('Policy bundle', run.policy_bundle_version === null ? NOT_REPORTED : `version ${run.policy_bundle_version}`)}
 ${row('Draft', `${creative.id} · version ${run.creative_version}`)}
 ${row('Image', describeImage(input))}
 ${row('Validation run id', run.validation_run_id)}

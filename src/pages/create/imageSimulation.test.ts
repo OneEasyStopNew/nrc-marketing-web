@@ -5,9 +5,17 @@ describe('runImageSimulation', () => {
   it('sets the simulation, says so, then refreshes the image', async () => {
     const calls: string[] = [];
     const deps = {
-      setMode: vi.fn(async () => { calls.push('set'); }),
-      refreshImage: vi.fn(async () => { calls.push('refresh'); }),
-      toast: vi.fn((title: string) => { calls.push(`toast:${title}`); }),
+      setMode: vi.fn(() => {
+        calls.push('set');
+        return Promise.resolve();
+      }),
+      refreshImage: vi.fn(() => {
+        calls.push('refresh');
+        return Promise.resolve();
+      }),
+      toast: vi.fn((title: string) => {
+        calls.push(`toast:${title}`);
+      }),
     };
     await runImageSimulation(deps, 'expired', 'The image link expired');
     expect(deps.setMode).toHaveBeenCalledWith('expired');
@@ -16,8 +24,8 @@ describe('runImageSimulation', () => {
 
   it('shows a failure toast instead of rejecting when the simulation call fails', async () => {
     const deps = {
-      setMode: vi.fn(async () => { throw new Error('session expired'); }),
-      refreshImage: vi.fn(async () => undefined),
+      setMode: vi.fn(() => Promise.reject(new Error('session expired'))),
+      refreshImage: vi.fn(() => Promise.resolve()),
       toast: vi.fn(),
     };
     await expect(runImageSimulation(deps, 'expired', 'The image link expired')).resolves.toBeUndefined();
@@ -28,8 +36,8 @@ describe('runImageSimulation', () => {
 
   it('shows the failure toast when refreshing the image fails', async () => {
     const deps = {
-      setMode: vi.fn(async () => undefined),
-      refreshImage: vi.fn(async () => { throw new Error('reset'); }),
+      setMode: vi.fn(() => Promise.resolve()),
+      refreshImage: vi.fn(() => Promise.reject(new Error('reset'))),
       toast: vi.fn(),
     };
     await expect(runImageSimulation(deps, 'expired', 'Done')).resolves.toBeUndefined();

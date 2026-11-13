@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import type { ReactNode, Ref, ReactElement } from 'react';
 import { Card as AxCard } from '@astryxdesign/core/Card';
 import { Divider } from '@astryxdesign/core/Divider';
 import { HStack, StackItem, VStack } from '@astryxdesign/core/Layout';
@@ -21,7 +21,7 @@ export interface CardProps {
   padding?: 'body' | 'none';
 }
 
-export function Card({ children, ref, 'aria-label': ariaLabel }: CardProps) {
+export function Card({ children, ref, 'aria-label': ariaLabel }: CardProps): ReactElement {
   return (
     <AxCard ref={ref} data-card="" aria-label={ariaLabel} padding={6}>
       <VStack gap={4}>{children}</VStack>
@@ -35,7 +35,7 @@ export function CardHead({ title, icon, lead, regulatory, badge, children, info 
   lead?: ReactNode; iconColor?: string; regulatory?: boolean; badge?: ReactNode; children?: ReactNode; className?: string;
   /** "What is this?" behind an info icon after the title. */
   info?: string;
-}) {
+}): ReactElement {
   return (
     <HStack gap={3} vAlign="center">
       {lead ?? (icon && <Icon name={icon} size={20} color={regulatory ? 'purple' : 'secondary'} />)}
@@ -51,11 +51,11 @@ export function CardHead({ title, icon, lead, regulatory, badge, children, info 
   );
 }
 
-export function CardBody({ children }: { children?: ReactNode; className?: string; style?: React.CSSProperties }) {
+export function CardBody({ children }: { children?: ReactNode; className?: string; style?: React.CSSProperties }): ReactElement {
   return <VStack gap={4}>{children}</VStack>;
 }
 
-export function CardFoot({ children }: { children?: ReactNode; className?: string; style?: React.CSSProperties }) {
+export function CardFoot({ children }: { children?: ReactNode; className?: string; style?: React.CSSProperties }): ReactElement {
   return (
     <>
       <Divider />

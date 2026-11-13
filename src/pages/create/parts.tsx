@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, ReactElement } from 'react';
+import { exhaustive } from '@/lib/exhaustive';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
@@ -13,7 +14,7 @@ import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
 import { Section } from '@astryxdesign/core/Section';
 import { HStack, VStack, StackItem } from '@astryxdesign/core/Layout';
 import type { PostFormat, StudySnapshot } from '@/api/session';
-import { currentValidation, latestValidation, type Creative, type Versioned } from '@/api/creatives';
+import type { Creative, Versioned } from '@/api/creatives';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/ui/Card';
@@ -22,22 +23,23 @@ import { Icon } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Overlay';
 import { fmtDateTime } from '@/lib/utils';
 import type { SaveState } from './useDraftEditor';
+import type { CheckView } from './useDraftChecks';
 
 /* ---------- Labels ---------- */
 
 const languageNames = (() => {
   try { return new Intl.DisplayNames(['en'], { type: 'language' }); } catch { return null; }
 })();
-export const languageLabel = (code: string) => languageNames?.of(code) ?? code;
+export const languageLabel = (code: string): string => languageNames?.of(code) ?? code;
 
 const words = (s: string) => s.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-export const formatLabel = (f: Pick<PostFormat, 'channel' | 'post_format'> & { aspect_ratio?: string }) =>
+export const formatLabel = (f: Pick<PostFormat, 'channel' | 'post_format'> & { aspect_ratio?: string }): string =>
   `${words(f.channel)} · ${words(f.post_format)}${f.aspect_ratio ? ` (${f.aspect_ratio})` : ''}`;
-export const formatKey = (f: Pick<PostFormat, 'channel' | 'post_format'>) => `${f.channel}|${f.post_format}`;
+export const formatKey = (f: Pick<PostFormat, 'channel' | 'post_format'>): string => `${f.channel}|${f.post_format}`;
 
 /* ---------- Step section (from the NRC Connect "Create post" studio) ---------- */
 
-export function Step({ n, title, hint, children }: { n: number; title: string; hint?: ReactNode; children: ReactNode }) {
+export function Step({ n, title, hint, children }: { n: number; title: string; hint?: ReactNode; children: ReactNode }): ReactElement {
   return (
     <VStack gap={3}>
       {n > 1 && <Divider />}
@@ -54,7 +56,7 @@ export function Step({ n, title, hint, children }: { n: number; title: string; h
 /* ---------- Approved study facts (read-only) ---------- */
 
 /** Shown exactly as received from the study snapshot; never editable. */
-export function StudyFacts({ study }: { study: StudySnapshot }) {
+export function StudyFacts({ study }: { study: StudySnapshot }): ReactElement {
   const f = study.facts;
   const ages = f.min_age != null || f.max_age != null
     ? `${f.min_age ?? 'Any'} to ${f.max_age ?? 'any'} years`
@@ -93,7 +95,7 @@ export function StudyFacts({ study }: { study: StudySnapshot }) {
 }
 
 /** Required wording from the study, shown under the caption. The user includes it; the validator checks it. */
-export function RequiredWording({ texts }: { texts: string[] }) {
+export function RequiredWording({ texts }: { texts: string[] }): ReactElement | null {
   if (!texts.length) return null;
   return (
     <Banner status="info" collapsible={false} icon={<Icon name="lock" />}
@@ -113,7 +115,7 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
   image?: { assetId: string; alt: string; provenance?: boolean };
   /** Final preview: the caption is never shortened. */
   full?: boolean;
-}) {
+}): ReactElement {
   const ratio = format ? format.width_px / format.height_px : 1;
   return (
     <AxCard padding={0} data-card="">
@@ -154,7 +156,7 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
 
 /* ---------- Save status ---------- */
 
-export function SaveStatus({ state, version }: { state: SaveState; version?: number }) {
+export function SaveStatus({ state, version }: { state: SaveState; version?: number }): ReactElement {
   const [variant, text] = ((): [Parameters<typeof Badge>[0]['variant'], string] => {
     switch (state.kind) {
       case 'unsaved': return ['neutral', 'Not saved yet'];
@@ -164,6 +166,7 @@ export function SaveStatus({ state, version }: { state: SaveState; version?: num
       case 'failed': return ['blocked', 'Save failed'];
       case 'conflict': return ['blocked', 'Version conflict'];
       case 'readonly': return ['neutral', 'Read-only'];
+      default: return exhaustive(state, ['neutral', 'Status unknown']);
     }
   })();
   return <span role="status" aria-live="polite"><Badge variant={variant}>{text}</Badge></span>;
@@ -171,56 +174,57 @@ export function SaveStatus({ state, version }: { state: SaveState; version?: num
 
 /* ---------- Validation and generation readiness ---------- */
 
+interface CheckAction { onClick: () => void; busy: boolean; disabled?: boolean }
+
 /**
- * What the backend says about the current version (CreativeRead.validation_runs).
- * Local edits make the last result out of date immediately. Generation
- * eligibility is not in the contract yet, so the UI never offers Generate.
+ * What is known about the current version: the brief, caption and image
+ * checks, and whether the server allows generating the image. Local edits make
+ * every result out of date at once.
  */
-export function ReadinessCard({ creative, editing, validate }: {
+export function ReadinessCard({ creative, editing, checks, generation, actions }: {
   creative: Creative;
   editing: boolean;
-  /** Present when this user may run validation on this draft now. */
-  validate?: { onClick: () => void; busy: boolean };
-}) {
-  const current = currentValidation(creative);
-  const latest = latestValidation(creative);
-  type V = { variant: 'neutral' | 'done' | 'blocked' | 'waiting' | 'brand'; text: string; note?: string };
-  const shown = current ?? latest;
-  const inProgress = !!current && ['QUEUED', 'RUNNING', 'WAITING_PROVIDER'].includes(current.state);
-  let validation: V;
-  if (editing && (current || latest)) validation = { variant: 'waiting', text: 'Out of date', note: 'The brief changed after the last validation.' };
-  else if (!current && latest) validation = { variant: 'waiting', text: 'Out of date', note: `Last validated version ${latest.creative_version}.` };
-  else if (!current) validation = { variant: 'neutral', text: 'Not validated' };
-  else if (['QUEUED', 'RUNNING', 'WAITING_PROVIDER'].includes(current.state)) validation = { variant: 'brand', text: 'Checking' };
-  else if (current.outcome === 'PASS') validation = { variant: 'done', text: 'Passed the assessed checks', note: `For version ${current.creative_version}.` };
-  else if (current.outcome === 'FAIL') validation = { variant: 'blocked', text: 'Failed', note: `For version ${current.creative_version}.` };
-  else if (current.outcome === 'NEEDS_REVIEW') validation = { variant: 'waiting', text: 'Needs review', note: `For version ${current.creative_version}.` };
-  else validation = { variant: 'blocked', text: 'Could not finish', note: 'Run validation again.' };
-
+  checks: CheckView[];
+  generation: { variant: CheckView['variant']; text: string; note?: string };
+  /** Present for a check when this user may run it on this draft now. */
+  actions: Partial<Record<CheckView['kind'], CheckAction>>;
+}): ReactElement {
+  const brief = checks.find((c) => c.kind === 'brief');
+  const link = (c: CheckView) => `/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(c.runId!)}`;
   return (
     <Card>
       <CardHead title="Validation and generation" />
       <CardBody>
         <Row label="Status"><Badge>Draft for review</Badge></Row>
-        <Row label="Validation" note={validation.note}><Badge variant={validation.variant}>{validation.text}</Badge></Row>
-        <Row label="Generation" note={editing ? 'Save your changes, then validate this version.' : 'Generation is not connected yet.'}>
-          <Badge>Not available yet</Badge>
-        </Row>
+        {checks.map((c) => (
+          <Row key={c.kind} label={c.kind === 'brief' ? 'Validation' : `${c.label} check`} note={c.note}>
+            <Badge variant={c.variant}>{c.text}</Badge>
+          </Row>
+        ))}
+        <Row label="Generation" note={generation.note}><Badge variant={generation.variant}>{generation.text}</Badge></Row>
       </CardBody>
       <CardFoot>
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Button variant="primary" icon="shield" disabled={!validate || editing || inProgress} loading={validate?.busy} onClick={validate?.onClick}>
+          <Button variant="primary" icon="shield" disabled={!actions.brief || !!actions.brief.disabled || editing || !!brief?.inProgress}
+            loading={actions.brief?.busy} onClick={actions.brief?.onClick}>
             Validate version {creative.version}
           </Button>
-          <Button variant="secondary" icon="img" disabled>Generate image</Button>
+          {actions.text && (
+            <Button variant="secondary" disabled={!!actions.text.disabled || editing} loading={actions.text.busy} onClick={actions.text.onClick}>Check caption</Button>
+          )}
+          {actions.image && (
+            <Button variant="secondary" disabled={!!actions.image.disabled || editing} loading={actions.image.busy} onClick={actions.image.onClick}>Check image</Button>
+          )}
         </HStack>
-        {shown && (
-          <AxLink href={`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(shown.validation_run_id)}`}>
-            {inProgress ? 'Follow the running check' : `View results for version ${shown.creative_version}`}
+        {checks.filter((c) => c.runId).map((c) => (
+          <AxLink key={c.kind} href={link(c)}>
+            {c.kind === 'brief'
+              ? (c.inProgress ? 'Follow the running check' : `View results for version ${c.runVersion ?? creative.version}`)
+              : `${c.label} check results`}
           </AxLink>
-        )}
+        ))}
         <Text type="supporting" color="secondary">
-          {editing ? 'Changes save first; then validate the new version.' : 'Generation is not connected in this build yet.'}
+          {editing ? 'Changes save first; then validate the new version.' : 'Validation is an automated check, not an approval.'}
         </Text>
       </CardFoot>
     </Card>
@@ -246,7 +250,7 @@ export function ConflictDialog({ open, server, mine, onClose, onUseTheirs, onSav
   onUseTheirs: () => void;
   onSaveMine: () => void;
   onCopyMine: () => void;
-}) {
+}): ReactElement {
   const theirs = { prompt: server.creative.current_prompt, caption: server.creative.caption ?? '' };
   const version = server.creative.version;
   const rows = (['prompt', 'caption'] as const).filter((k) => theirs[k] !== mine[k]);

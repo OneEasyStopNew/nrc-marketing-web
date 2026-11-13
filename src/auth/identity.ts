@@ -7,12 +7,17 @@ import type { Profile } from '@/api/session';
  * the app cannot tell them apart.
  */
 export interface IdentityProvider {
-  readonly mode: 'cognito' | 'simulation';
+  readonly mode: 'cognito' | 'simulation' | 'devtoken';
   /** Leaves the app for the sign-in page. `returnTo` must already be validated. */
   startSignIn(returnTo: string, opts?: { identity?: string; forceLogin?: boolean }): Promise<void>;
   /** Completes the redirect on /auth/callback. Resolves to the stored return path. */
   completeSignIn(url: string): Promise<{ returnTo: unknown }>;
   getAccessToken(): string | null;
+  /**
+   * Development-token mode only: the session exists although the browser holds
+   * no token (the dev server adds it to each request).
+   */
+  hasSession?(): boolean;
   /** Name and email from the ID token, for display only. */
   getProfile(): Profile;
   /** One refresh attempt with the in-memory refresh token. Null when it cannot renew. */

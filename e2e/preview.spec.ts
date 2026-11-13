@@ -1,6 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { z } from 'zod';
 import { lightTheme, seen, signInAt } from './helpers';
+
+/** The fields of a downloaded review draft this test reads. */
+const DownloadedManifest = z.object({
+  status: z.literal('DRAFT'),
+  creative_version: z.number().int(),
+  latest_validation: z.object({ outcome: z.string().nullable() }).nullable(),
+  image: z.record(z.string(), z.unknown()),
+});
 
 /**
  * NRC-23 demo slice in simulation mode: the exact saved version as it would
@@ -26,13 +35,13 @@ test('the final preview shows the exact version, what it was checked against, an
   await expect(page).toHaveURL(/\/marketing\/create\/sim-cr-0001\/preview$/);
   await expect(page.getByRole('heading', { name: 'Final preview' })).toBeVisible();
 
-  await expect(preview(page).getByRole('img', { name: /^Generated image for the brief: .+ \(simulation placeholder\)$/ })).toBeVisible();
+  await expect(preview(page).getByRole('img', { name: /^Generated image for the brief: .+ \(placeholder picture\)$/ })).toBeVisible();
   await expect(preview(page)).toContainText('[Required disclosure placeholder: this is a research study.]');
   await expect(seen(page, 'Not approved; not posted')).toBeVisible();
   await expect(seen(page, 'Passed the assessed checks')).toBeVisible();
-  await expect(seen(page, 'sim-policy-2026.11')).toBeVisible();
+  await expect(seen(page, 'version 1', { exact: true })).toBeVisible();
   await expect(seen(page, '515151515151')).toBeVisible();
-  await expect(seen(page, 'Reviewer approval is a separate step and is not part of this build.')).toBeVisible();
+  await expect(seen(page, 'Reviewer approval is a separate step. This page does not approve anything.')).toBeVisible();
   // Nothing on the preview is editable.
   await expect(page.getByRole('textbox')).toHaveCount(0);
 });
@@ -44,10 +53,11 @@ test('the review draft downloads without the signed image link', async ({ page }
     page.getByRole('button', { name: 'Download review draft' }).click(),
   ]);
   expect(download.suggestedFilename()).toBe('nrc-review-draft-sim-cr-0001-v3.json');
-  const body = JSON.parse(await readFile((await download.path())!, 'utf8'));
+  // The download is checked like any other untrusted file: through its schema.
+  const body = DownloadedManifest.parse(JSON.parse(await readFile(await download.path(), 'utf8')));
   expect(body.status).toBe('DRAFT');
   expect(body.creative_version).toBe(3);
-  expect(body.latest_validation.outcome).toBe('PASS');
+  expect(body.latest_validation?.outcome).toBe('PASS');
   expect(body.image).not.toHaveProperty('download_url');
   expect(JSON.stringify(body)).not.toContain('data:image');
   await expect(seen(page, 'Review draft for version 3 downloaded')).toBeVisible();
@@ -87,7 +97,7 @@ const downloadReport = async (page: Page): Promise<string> => {
     page.getByRole('button', { name: 'Download validation report' }).click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/^nrc-validation-report-sim-cr-0001-v3-[A-Za-z0-9._-]+\.html$/);
-  return readFile((await download.path())!, 'utf8');
+  return readFile(await download.path(), 'utf8');
 };
 
 test('the validation report downloads after a reload, matches the preview and is labelled a draft and a simulation', async ({ page }) => {
@@ -102,7 +112,7 @@ test('the validation report downloads after a reload, matches the preview and is
   expect(report).toContain('It is not an approval');
   expect(report).toContain('Simulation: synthetic data');
   expect(report).toContain('sim-cr-0001 · version 3');
-  expect(report).toContain('sim-policy-2026.11');
+  expect(report).toContain('Policy bundle</th><td class="evidence">version 1');
   expect(report).toContain('PASS');
   expect(report).not.toContain('Historical result');
   // Self-contained and inert: no scripts, links, image data or signed URLs.

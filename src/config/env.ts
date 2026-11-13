@@ -2,7 +2,7 @@
  * Build-time configuration (see .env.example). Every value is public: it is
  * compiled into the browser bundle, so nothing secret may be read here.
  */
-export type AuthMode = 'cognito' | 'simulation';
+export type AuthMode = 'cognito' | 'simulation' | 'devtoken';
 
 const env = import.meta.env;
 const trim = (v: string | undefined) => (v ?? '').trim();
@@ -11,9 +11,12 @@ const trim = (v: string | undefined) => (v ?? '').trim();
  * Explicit setting wins. Unset: simulation in `npm run dev` (dummy data, no
  * backend needed), Cognito in every build (which refuses simulation anyway).
  */
-const requestedMode = trim(env.VITE_AUTH_MODE);
+// `npm run dev:sim` (vite --mode simulation) is always simulation, whatever .env says.
+const requestedMode = env.MODE === 'simulation' ? 'simulation' : trim(env.VITE_AUTH_MODE);
 export const AUTH_MODE: AuthMode =
-  requestedMode === 'simulation' || requestedMode === 'cognito' ? requestedMode : env.DEV ? 'simulation' : 'cognito';
+  requestedMode === 'simulation' || requestedMode === 'cognito' || requestedMode === 'devtoken'
+    ? requestedMode
+    : env.DEV ? 'simulation' : 'cognito';
 /**
  * Build-time switch: simulation code (fake sign-in, fake API, local dummy
  * data) is compiled in only for `npm run dev` or an explicit
@@ -21,6 +24,17 @@ export const AUTH_MODE: AuthMode =
  * production build drops those modules entirely instead of shipping them unused.
  */
 export const SIMULATION_BUILD = import.meta.env.DEV || import.meta.env.VITE_ALLOW_SIMULATION === 'true';
+/**
+ * Development-token sign-in (VITE_AUTH_MODE=devtoken) exists only in
+ * `npm run dev`: the dev server adds the token to proxied API calls, so there
+ * is nothing a build could do with this mode. No build includes its code.
+ */
+export const DEVTOKEN_BUILD = import.meta.env.DEV;
+/**
+ * `npm run dev` only: image links from the local S3 (http://127.0.0.1:8333, the API's
+ * SeaweedFS) are drawn. Every build, staging and production, accepts https image links only.
+ */
+export const LOCAL_HTTP_IMAGES = import.meta.env.DEV;
 export const API_BASE_URL = trim(env.VITE_API_BASE_URL).replace(/\/$/, '');
 export const API_PREFIX = '/v1/marketing';
 
@@ -41,14 +55,17 @@ export const COGNITO: CognitoConfig = {
 };
 
 /** Where Cognito sends the user back to. Both must be registered on the app client. */
-export const redirectUri = () => `${window.location.origin}/auth/callback`;
-export const logoutUri = () => `${window.location.origin}/signed-out`;
+export const redirectUri = (): string => `${window.location.origin}/auth/callback`;
+export const logoutUri = (): string => `${window.location.origin}/signed-out`;
 
 /**
  * Returns what is wrong with the configuration, or null. The app shows this
  * instead of a blank page or a half-working sign-in.
  */
 export function configProblem(): string | null {
+  if (AUTH_MODE === 'devtoken') {
+    return DEVTOKEN_BUILD ? null : 'This build is set to development-token sign-in, which works only in `npm run dev`. Set VITE_AUTH_MODE=cognito.';
+  }
   if (AUTH_MODE === 'simulation') {
     if (env.PROD && trim(env.VITE_ALLOW_SIMULATION) !== 'true') {
       return 'This build is set to simulation sign-in, which is turned off for production builds. Set VITE_AUTH_MODE=cognito.';

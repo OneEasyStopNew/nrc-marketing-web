@@ -19,9 +19,9 @@ export interface ReportPreview {
   creativeId: string;
   /** Creative version shown on the preview. */
   version: number;
-  /** Latest run id the preview shows. */
+  /** The run the preview shows, however the preview found it (draft, review package or this tab). */
   runId: string | undefined;
-  /** The image the preview shows (already loaded by the page). */
+  /** The image the preview shows; its id even when the image itself failed to load. */
   asset: { id: string; checksumSha256: string | null } | undefined;
 }
 
@@ -67,6 +67,8 @@ const NOTICE_FOR: Record<ErrorKind, (e: ApiError) => Notice | undefined> = {
   stale: () => STALE,
   unauthenticated: () => undefined,
   // ApiError messages are already generic (they never carry the response body).
+  // The API answered in a shape this build doesn't understand: its generic message says to reload.
+  contract: (e) => ({ ...TRY_AGAIN, detail: e.message }),
   conflict: (e) => ({ ...TRY_AGAIN, detail: e.message }),
   invalid: (e) => ({ ...TRY_AGAIN, detail: e.message }),
   server: (e) => ({ ...TRY_AGAIN, detail: e.message }),
@@ -97,23 +99,27 @@ export function useValidationReport(preview: ReportPreview): { download: () => P
     const { signal } = ctl;
     setDownloading(true);
     try {
+      const runId = preview.runId;
+      if (!runId) return show(NO_RESULT);
       // A timeout surfaces as a network ApiError (retryable), not as our own abort.
       const { creative } = await creativesApi.get(
         preview.creativeId,
         AbortSignal.any([signal, AbortSignal.timeout(REPORT_DRAFT_READ_TIMEOUT_MS)]),
       );
       if (signal.aborted) return;
+      // The preview finds its run and image in the draft, else the review package, else this tab's runs.
+      // So only what the draft itself names can contradict the preview; silence in the draft is not a change.
       if (creative.version !== preview.version) return show(STALE);
+      if (creative.asset_id && creative.asset_id !== preview.asset?.id) return show(STALE);
+      const listed = latestValidation(creative);
+      if (listed && listed.validation_run_id !== runId) return show(STALE);
 
-      const latest = latestValidation(creative);
-      if (!latest) return show(NO_RESULT);
-      if (latest.validation_run_id !== preview.runId) return show(STALE);
-      if (isInProgress(latest.state)) return show(STILL_RUNNING);
-      if ((creative.asset_id ?? undefined) !== preview.asset?.id) return show(STALE);
-
-      const run = await validationsApi.get(latest.validation_run_id, signal);
+      const run = await validationsApi.get(runId, signal);
       if (signal.aborted) return;
-      if (run.validation_run_id !== latest.validation_run_id || run.creative_version !== latest.creative_version) return show(STALE);
+      if (run.validation_run_id !== runId || run.creative_version > creative.version) return show(STALE);
+      // An image check of another image would describe a picture the preview no longer shows.
+      if (run.asset_id && run.asset_id !== preview.asset?.id) return show(STALE);
+      if (isInProgress(run.state)) return show(STILL_RUNNING);
 
       const study = context.studies.find((s) => s.study_id === creative.study_id);
       const isCurrent = run.is_current && run.creative_version === creative.version;
@@ -128,10 +134,7 @@ export function useValidationReport(preview: ReportPreview): { download: () => P
         simulation: mode === 'simulation',
         generatedAt: new Date(),
       });
-      saveFile(
-        validationReportFileName({ creative: draft, run }),
-        new Blob([report], { type: 'text/html;charset=utf-8' }),
-      );
+      saveFile(validationReportFileName({ creative: draft, run }), new Blob([report], { type: 'text/html;charset=utf-8' }));
       if (isCurrent) {
         toast(`Validation report for version ${run.creative_version} downloaded`, 'done', 'It is a draft for review, not an approval.');
       } else {

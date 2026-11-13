@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { initialRenewal, renewalStep, type RenewalEvent, type RenewalState } from './imageRenewal';
 
 const run = (events: RenewalEvent['type'][], from: RenewalState = initialRenewal) =>
-  events.reduce((s, type) => renewalStep(s, { type } as RenewalEvent), from);
+  events.reduce((s, type) => renewalStep(s, { type }), from);
 
 describe('renewalStep', () => {
   it('shows the image when it loads', () => {
@@ -49,7 +49,10 @@ describe('renewalStep', () => {
     let s = initialRenewal;
     for (let i = 0; i < 50; i++) {
       s = renewalStep(s, { type: 'load_failed' });
-      if (s.phase === 'renewing') { renewals++; s = renewalStep(s, { type: 'renewed' }); }
+      if (s.phase === 'renewing') {
+        renewals++;
+        s = renewalStep(s, { type: 'renewed' });
+      }
     }
     expect(renewals).toBe(1);
     expect(s.phase).toBe('failed');

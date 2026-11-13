@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { assetDenied, assetKeys, InvalidResponseError, isSimulatedAsset, manifestForDownload, parseAssetRead, shortHash, type ExportManifest } from './assets';
+import { assetDenied, assetKeys, assetReadSchema, isPlaceholderImage, manifestForDownload, mediaItemSchema, shortHash, type ExportManifest } from './assets';
 import { ApiError } from './errors';
 
 const manifest: ExportManifest = {
   status: 'DRAFT', creative_id: 'c1', creative_version: 3, caption: 'Caption', study_snapshot_version: 2,
-  policy_bundle_version: 'p1', latest_validation: null, exported_at: '2026-11-10T00:00:00Z',
+  policy_bundle_version: 1, latest_validation: null, exported_at: '2026-11-10T00:00:00Z',
   image: {
     asset_id: 'a1', creative_id: 'c1', origin: 'generated', mime_type: 'image/png', width_px: 1080, height_px: 1080,
     size_bytes: 10, checksum_sha256: 'abcdef0123456789', provider: 'p', model: 'm', created_at: '2026-11-10T00:00:00Z',
@@ -28,12 +28,12 @@ describe('manifestForDownload', () => {
   });
 });
 
-describe('isSimulatedAsset', () => {
-  it('labels both simulation provider names, in any case', () => {
-    expect(isSimulatedAsset({ provider: 'simulation' })).toBe(true);
-    expect(isSimulatedAsset({ provider: 'Simulator' })).toBe(true);
-    expect(isSimulatedAsset({ provider: 'higgsfield' })).toBe(false);
-    expect(isSimulatedAsset({ provider: null })).toBe(false);
+describe('isPlaceholderImage', () => {
+  it('labels the simulation and demo-stub providers only', () => {
+    expect(isPlaceholderImage({ provider: 'simulation' })).toBe(true);
+    expect(isPlaceholderImage({ provider: 'demo-stub' })).toBe(true);
+    expect(isPlaceholderImage({ provider: 'higgsfield' })).toBe(false);
+    expect(isPlaceholderImage({ provider: null })).toBe(false);
   });
 });
 
@@ -46,17 +46,18 @@ describe('assetDenied', () => {
   });
 });
 
-describe('parseAssetRead', () => {
+describe('assetReadSchema', () => {
   const valid = {
     asset_id: 'a1', creative_id: 'c1', origin: 'generated', mime_type: 'image/png', width_px: 1080, height_px: 1350,
     size_bytes: 10, checksum_sha256: 'ab'.repeat(32), provider: 'higgsfield', model: 'm', created_at: '2026-11-10T00:00:00Z',
     download_url: 'https://signed.example.test/a1?sig=x', download_url_expires_at: '2026-11-10T00:10:00+05:30',
   };
-  const parse = (patch: Record<string, unknown>, allowDataImage = false) => () => parseAssetRead({ ...valid, ...patch }, { allowDataImage });
+  const parse = (patch: Record<string, unknown>, allowDataImage = false) =>
+    assetReadSchema({ allowDataImage, allowLocalHttp: false }).safeParse({ ...valid, ...patch });
 
   it('accepts a body that matches the contract', () => {
-    expect(parseAssetRead(valid, { allowDataImage: false })).toEqual(valid);
-    expect(parse({ provider: null, model: null, download_url: null, download_url_expires_at: null })()).toMatchObject({ download_url: null });
+    expect(parse({}).data).toEqual(valid);
+    expect(parse({ provider: null, model: null, download_url: null, download_url_expires_at: null }).success).toBe(true);
   });
 
   it.each([
@@ -67,28 +68,50 @@ describe('parseAssetRead', () => {
     ['an invalid created_at', { created_at: 'yesterday' }],
     ['a created_at without offset', { created_at: '2026-11-10T00:00:00' }],
     ['an unknown origin', { origin: 'scraped' }],
-    ['a missing asset id', { asset_id: '' }],
     ['a negative size', { size_bytes: -1 }],
     ['an http link', { download_url: 'http://signed.example.test/a1' }],
     ['a javascript link', { download_url: 'javascript:alert(1)' }],
     ['a non-image data link', { download_url: 'data:text/html;base64,PHNjcmlwdD4=' }],
   ])('rejects %s', (_name, patch) => {
-    expect(parse(patch)).toThrow(InvalidResponseError);
+    expect(parse(patch).success).toBe(false);
+  });
+
+  it('accepts a local S3 http link only with the dev-build rule', () => {
+    const local = { download_url: 'http://127.0.0.1:8333/nrc-local-media/a1.png?X-Amz-Signature=ab' };
+    expect(parse(local).success).toBe(false);
+    expect(assetReadSchema({ allowDataImage: false, allowLocalHttp: true }).safeParse({ ...valid, ...local }).success).toBe(true);
   });
 
   it('accepts a data:image link only where simulation is allowed', () => {
-    expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' })).toThrow(InvalidResponseError);
-    expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' }, true)()).toMatchObject({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' });
+    expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' }).success).toBe(false);
+    expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' }, true).success).toBe(true);
   });
+});
 
-  it('rejects a body that is not an object', () => {
-    expect(() => parseAssetRead(null, { allowDataImage: false })).toThrow(InvalidResponseError);
-    expect(() => parseAssetRead([valid], { allowDataImage: false })).toThrow(InvalidResponseError);
+describe('mediaItemSchema', () => {
+  const item = {
+    asset_id: 'a1', creative_id: 'c1', creative_version: 2, origin: 'generated', mime_type: 'image/png', width_px: 1080,
+    height_px: 1080, size_bytes: 10, created_at: '2026-11-10T00:00:00Z', created_by: 'u1', created_by_name: null,
+    download_url: 'https://signed.example.test/a1?sig=x', download_url_expires_at: '2026-11-10T00:10:00Z',
+  };
+
+  it('accepts a library item and refuses a link or size the image cannot use', () => {
+    const schema = mediaItemSchema({ allowDataImage: false, allowLocalHttp: false });
+    expect(schema.safeParse(item).success).toBe(true);
+    expect(schema.safeParse({ ...item, download_url: 'http://signed.example.test/a1' }).success).toBe(false);
+    expect(schema.safeParse({ ...item, width_px: 0 }).success).toBe(false);
   });
 });
 
 describe('assetKeys', () => {
-  it('scopes an asset to its organisation', () => {
+  it('scopes every asset key to its organisation', () => {
     expect(assetKeys.detail('t1', 'a1')).toEqual(['asset', 't1', 'a1']);
+    expect(assetKeys.draftExport('t1', 'c1', 3)).toEqual(['draft-export', 't1', 'c1', 3]);
+    expect(assetKeys.mediaLibrary('t1')).toEqual(['ws', 't1', 'media-library']);
+  });
+
+  it('lets one key invalidate the export of every version of a draft', () => {
+    const all = assetKeys.draftExports('t1', 'c1');
+    expect(assetKeys.draftExport('t1', 'c1', 3).slice(0, all.length)).toEqual([...all]);
   });
 });

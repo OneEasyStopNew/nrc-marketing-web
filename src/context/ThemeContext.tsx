@@ -1,12 +1,22 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode, type ReactElement } from 'react';
 
 type Theme = 'light' | 'dark' | 'system';
-const Ctx = createContext<{ theme: Theme; resolved: 'light' | 'dark'; setTheme: (t: Theme) => void } | null>(null);
+const THEMES: readonly Theme[] = ['light', 'dark', 'system'];
+const isTheme = (v: unknown): v is Theme => THEMES.includes(v as Theme);
+
+export interface ThemeValue {
+  theme: Theme;
+  /** What is actually shown: the system preference resolved. */
+  resolved: 'light' | 'dark';
+  setTheme: (t: Theme) => void;
+}
+const Ctx = createContext<ThemeValue | null>(null);
 
 /** Light, dark or system. The design system's tokens switch on `[data-theme]` of <html>. */
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export function ThemeProvider({ children }: { children: ReactNode }): ReactElement {
   const [theme, setTheme] = useState<Theme>(() => {
-    try { return (localStorage.getItem('theme') as Theme) || 'system'; } catch { return 'system'; }
+    // A stored value is used only if it is one of the three themes (JS-59).
+    try { const v = localStorage.getItem('theme'); return isTheme(v) ? v : 'system'; } catch { return 'system'; }
   });
   const [resolved, setResolved] = useState<'light' | 'dark'>('light');
 
@@ -28,7 +38,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={{ theme, resolved, setTheme }}>{children}</Ctx.Provider>;
 }
 
-export function useTheme() {
+export function useTheme(): ThemeValue {
   const c = useContext(Ctx);
   if (!c) throw new Error('useTheme must be used within ThemeProvider');
   return c;

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { lightTheme, seen, settle, signInAt } from './helpers';
+import { lightTheme, navOf, openNav, seen, settle, signInAt } from './helpers';
 
 /**
  * NRC-17 acceptance in simulation mode (fixtures from the local src/mocks/data.ts).
@@ -18,18 +18,24 @@ const SEEDED = '/marketing/create/sim-cr-0001';
 const brief = (page: Page) => page.getByRole('textbox', { name: /^Brief/ });
 const caption = (page: Page) => page.getByRole('textbox', { name: /^Caption/ });
 const status = (page: Page) => page.getByRole('status').filter({ hasText: /Saved|Saving|Unsaved|Not saved|failed|conflict|Read-only/ });
-const drafts = (page: Page) => page.locator('[data-card]', { has: page.getByRole('heading', { name: 'Your drafts' }) }).locator('li button');
+/** Leaves the composer through the side menu (the drafts list is in development, so drafts open by link). */
+async function goToValidation(page: Page) {
+  await openNav(page);
+  await navOf(page).getByRole('link', { name: 'Validation' }).click();
+}
 
 test('opening and leaving an untouched composer creates no draft', async ({ page }) => {
   // AC: opening/closing an unused composer leaves zero new drafts.
   await signInAt(page, '/marketing/create', 'creator');
-  await expect(drafts(page).first()).toBeVisible();
-  const before = await drafts(page).count();
-  await drafts(page).first().click();
-  await expect(page).toHaveURL(/\/marketing\/create\/sim-cr-\d{4}$/);
+  await expect(seen(page, 'Nothing is saved until you create the draft.')).toBeVisible();
+  await goToValidation(page);
+  await expect(page).toHaveURL(/\/marketing\/validation$/);
   await page.goBack();
   await settle(page);
-  await expect(drafts(page)).toHaveCount(before);
+  // Still the empty composer: no draft id in the address and nothing saved.
+  await expect(page).toHaveURL(/\/marketing\/create$/);
+  await expect(seen(page, 'Nothing is saved until you create the draft.')).toBeVisible();
+  await expect(status(page)).not.toHaveText(/Saved · version/);
 });
 
 test('a draft is created only on "Create draft", and a reload restores it', async ({ page }) => {
@@ -69,8 +75,8 @@ test('an edit autosaves a new version and makes the old validation out of date a
   await signInAt(page, SEEDED, 'creator');
   await expect(status(page)).toHaveText('Saved · version 3');
   await expect(seen(page, 'Passed the assessed checks')).toBeVisible();
-  // Generation eligibility is not in the backend contract yet: never offered.
-  await expect(page.getByRole('button', { name: 'Generate image' })).toBeDisabled();
+  // The brief of this version passed, so the server allows generation (the draft already has an image).
+  await expect(page.getByRole('button', { name: 'Generate a new image' })).toBeEnabled();
 
   await caption(page).press('Control+End');
   await caption(page).pressSequentially(' More.');
@@ -126,16 +132,16 @@ test('leaving with unsaved text asks first', async ({ page }) => {
   // AC: navigation warns about unsaved edits.
   await signInAt(page, '/marketing/create', 'creator');
   await brief(page).fill('Typed but not saved.');
-  await drafts(page).first().click();
+  await goToValidation(page);
   const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Stay on this page' }).click();
   await expect(page).toHaveURL(/\/marketing\/create$/);
   await expect(brief(page)).toHaveValue('Typed but not saved.');
 
-  await drafts(page).first().click();
+  await goToValidation(page);
   await page.getByRole('dialog', { name: 'Leave without saving?' }).getByRole('button', { name: 'Leave and discard' }).click();
-  await expect(page).toHaveURL(/\/marketing\/create\/sim-cr-\d{4}$/);
+  await expect(page).toHaveURL(/\/marketing\/validation$/);
 });
 
 test('no study configured, and only closed studies, are different states', async ({ page }) => {
@@ -149,7 +155,8 @@ test('a closed study keeps its drafts as read-only history', async ({ page }) =>
   await signInAt(page, '/marketing/create', 'creator-closed');
   await expect(seen(page, 'No study is recruiting right now')).toBeVisible();
   await expect(brief(page)).toHaveCount(0);
-  await drafts(page).first().click();
+  // The seeded draft of the closed study, opened by its link.
+  await signInAt(page, '/marketing/create/sim-cr-0002', 'creator-closed');
   await expect(seen(page, /is closed\. This draft is read-only history/)).toBeVisible();
   await expect(brief(page)).toBeDisabled();
   await expect(status(page)).toHaveText('Read-only');

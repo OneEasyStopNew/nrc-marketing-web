@@ -1,15 +1,16 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { useState, type ReactNode, type ReactElement } from 'react';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Link as AxLink } from '@astryxdesign/core/Link';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import { useAuth, useSession } from '@/auth/AuthProvider';
-import { assetDenied, assetKeys, assetsApi, manifestForDownload, useAsset } from '@/api/assets';
-import { creativesApi, currentValidation, latestValidation } from '@/api/creatives';
+import { assetDenied, assetKeys, assetsApi, manifestForDownload, useAsset, useDraftExport } from '@/api/assets';
+import { creativesApi, latestValidation } from '@/api/creatives';
 import { http } from '@/api/http';
 import { isApiError } from '@/api/errors';
 import { isInProgress, passedAssessedChecks } from '@/api/validations';
@@ -24,6 +25,7 @@ import { runImageSimulation } from './imageSimulation';
 import { SIMULATION_BUILD } from '@/config/env';
 import { saveFile } from '@/lib/download';
 import { fmtDateTime } from '@/lib/utils';
+import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
 import { formatLabel, languageLabel, PostPreview } from './parts';
 import { useValidationReport } from './useValidationReport';
@@ -33,12 +35,14 @@ import { useValidationReport } from './useValidationReport';
  * be posted, with what it was checked against, and the review-draft export.
  * It stays a "Draft for review": reviewer approval is a later, separate step.
  */
+// The simulation endpoint only acknowledges.
+const SIM_ACK = z.object({ ok: z.literal(true) });
+
 export default function FinalPreview(): ReactElement {
   const { creativeId = '' } = useParams();
   const { context } = useSession();
   const { mode } = useAuth();
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const q = useQuery({
     queryKey: ['creative-preview', context.tenant.tenant_id, creativeId],
@@ -46,18 +50,24 @@ export default function FinalPreview(): ReactElement {
     staleTime: 0,
   });
   const creative = q.data?.creative;
-  const asset = useAsset(creative?.asset_id);
+  // The image and the latest check of this exact version: from the draft when the API
+  // names them there, else from the review package, else from a run started in this tab.
+  const pkg = useDraftExport(creative && !creative.asset_id ? creative.id : undefined, creative?.version);
+  const assetId = creative?.asset_id ?? pkg.data?.image.asset_id ?? null;
+  const asset = useAsset(assetId);
   // An image the API now refuses is not described from the cache either.
   const image = assetDenied(asset.error) ? undefined : asset.data;
-  const latest = creative ? latestValidation(creative) : undefined;
-  const run = useValidationRun(latest?.validation_run_id ?? '');
+  const listed = creative ? latestValidation(creative) ?? pkg.data?.latest_validation ?? undefined : undefined;
+  const known = creative && !listed ? knownRuns(context.tenant.tenant_id, creative.id)[0] : undefined;
+  const run = useValidationRun(listed?.validation_run_id ?? known?.id);
+  const latest = listed ?? run.data;
   const [exporting, setExporting] = useState(false);
-  // The draft's image id is passed even when the image failed to load, so a load error is not read as "the draft changed".
+  // What the preview resolved above, so the report describes the same run and image (even an image that failed to load).
   const report = useValidationReport({
     creativeId,
     version: creative?.version ?? 0,
-    runId: latest?.validation_run_id,
-    asset: creative?.asset_id ? { id: creative.asset_id, checksumSha256: image?.checksum_sha256 ?? null } : undefined,
+    runId: listed?.validation_run_id ?? known?.id,
+    asset: assetId ? { id: assetId, checksumSha256: image?.checksum_sha256 ?? null } : undefined,
   });
 
   const draftLink = `/marketing/create/${encodeURIComponent(creativeId)}`;
@@ -81,7 +91,7 @@ export default function FinalPreview(): ReactElement {
 
   const study = context.studies.find((s) => s.study_id === creative.study_id);
   const format = context.post_formats.find((f) => f.channel === creative.channel && f.post_format === creative.post_format);
-  const current = currentValidation(creative);
+  const current = latest && latest.is_current && latest.creative_version === creative.version ? latest : undefined;
   const fullRun = latest && run.data?.validation_run_id === latest.validation_run_id ? run.data : undefined;
   const passed = !!current && !!fullRun && fullRun.is_current && passedAssessedChecks(fullRun);
   const studyChanged = !!study && study.version !== creative.study_snapshot_version;
@@ -97,7 +107,7 @@ export default function FinalPreview(): ReactElement {
     } catch (e) {
       if (!isApiError(e)) throw e;
       if (e.kind === 'not_implemented') toast('Export is not available yet', 'waiting', 'The export service is not connected in this build.');
-      else if (e.kind === 'invalid') toast('Nothing to export yet', 'waiting', 'The draft needs an image first.');
+      else if (e.code === 'EXPORT_NOT_READY' || e.kind === 'invalid') toast('Nothing to export yet', 'waiting', 'The draft needs an image first.');
       else toast('The review draft could not be downloaded', 'blocked', e.retryable ? 'Try again in a moment.' : e.message);
     } finally {
       setExporting(false);
@@ -106,10 +116,9 @@ export default function FinalPreview(): ReactElement {
 
   // Simulation only: the fake API answers the next image request this way, then the image is asked for again.
   const simulateImage = async (kind: string, done: string): Promise<void> => {
-    const assetId = creative.asset_id;
     if (!assetId) return; // the tools render only when the draft has an image
     await runImageSimulation({
-      setMode: async (mode) => { await http.post('/__sim/next-image-link', { mode }); },
+      setMode: async (mode) => { await http.post('/__sim/next-image-link', SIM_ACK, { mode }); },
       refreshImage: () => qc.invalidateQueries({ queryKey: assetKeys.detail(context.tenant.tenant_id, assetId) }),
       toast,
     }, kind, done);
@@ -138,18 +147,18 @@ export default function FinalPreview(): ReactElement {
             <Button variant="secondary" icon="dl" loading={report.downloading} disabled={!latest || isInProgress(latest.state)} onClick={() => void report.download()}>
               Download validation report
             </Button>
-            <Button variant="primary" icon="dl" loading={exporting} disabled={!creative.asset_id} onClick={() => void download()}>
+            <Button variant="primary" icon="dl" loading={exporting} disabled={!assetId} onClick={() => void download()}>
               Download review draft
             </Button>
           </>
         )} />
 
-      {!creative.asset_id && (
+      {!assetId && !pkg.isFetching && (
         <Alert tone="info" title="No image yet">The review draft can be downloaded once the image is generated.</Alert>
       )}
       {studyChanged && (
         <Alert tone="waiting" title="The study facts changed">
-          This draft was written against study snapshot version {creative.study_snapshot_version}; the current one is version {study!.version}. Check the brief and validate again.
+          This draft was written against study snapshot version {creative.study_snapshot_version}; the current one is version {study.version}. Check the brief and validate again.
         </Alert>
       )}
       {imageAfterEdit && (
@@ -162,7 +171,7 @@ export default function FinalPreview(): ReactElement {
         <section aria-label="Post preview"><VStack gap={4}>
           {/* Provenance is in "What this preview is", so the image shows without its caption here. */}
           <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
-            image={creative.asset_id ? { assetId: creative.asset_id, alt: imageAltForBrief(creative.current_prompt), provenance: false } : undefined} />
+            image={assetId ? { assetId, alt: imageAltForBrief(creative.current_prompt), provenance: false } : undefined} />
         </VStack></section>
 
         <VStack gap={4}>
@@ -180,11 +189,11 @@ export default function FinalPreview(): ReactElement {
                     <AxLink href={`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(latest.validation_run_id)}`}>Evidence</AxLink>
                   )}
                 </Pair>
-                <Pair k="Policy bundle">{fullRun?.policy_bundle_version ? <Text type="code">{fullRun.policy_bundle_version}</Text> : <Text type="body" color="secondary">Not reported</Text>}</Pair>
+                <Pair k="Policy rules">{fullRun?.policy_bundle_version != null ? `version ${fullRun.policy_bundle_version}` : <Text type="body" color="secondary">Not reported</Text>}</Pair>
                 <Pair k="Image">
                   {image
                     ? <AssetProvenance asset={image} />
-                    : <Text type="body" color="secondary">{!creative.asset_id ? 'None yet' : asset.isPending ? 'Loading' : 'Not available'}</Text>}
+                    : <Text type="body" color="secondary">{!assetId ? 'None yet' : asset.isPending ? 'Loading' : 'Not available'}</Text>}
                 </Pair>
               </MetadataList>
             </CardBody>
@@ -200,7 +209,7 @@ export default function FinalPreview(): ReactElement {
             </Card>
           )}
 
-          {SIMULATION_BUILD && mode === 'simulation' && creative.asset_id && (
+          {SIMULATION_BUILD && mode === 'simulation' && assetId && (
             <Card>
               <CardHead title="Simulation tools" icon="warn" />
               <CardBody>
@@ -215,9 +224,9 @@ export default function FinalPreview(): ReactElement {
           <Card>
             <CardHead title="Approval" icon="check" />
             <CardBody>
-              <Text type="body" wordBreak="break-word">Reviewer approval is a separate step and is not part of this build.</Text>
+              <Text type="body" wordBreak="break-word">Reviewer approval is a separate step. This page does not approve anything.</Text>
               <Text type="body" color="secondary">Passing validation does not approve a post, and downloading the review draft does not publish it.</Text>
-              <div><Button size="sm" variant="ghost" onClick={() => navigate(draftLink)}>Change the draft</Button></div>
+              <div><Button size="sm" variant="ghost" href={draftLink}>Change the draft</Button></div>
             </CardBody>
           </Card>
         </VStack>

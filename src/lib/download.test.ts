@@ -12,15 +12,18 @@ describe('saveFile', () => {
     vi.useFakeTimers();
     // jsdom has no object URLs.
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: vi.fn(() => 'blob:synthetic') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: vi.fn() });
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: revoke });
     const clicked: string[] = [];
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(this: HTMLAnchorElement) { clicked.push(`${this.download} ${this.href}`); });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(this: HTMLAnchorElement) {
+      clicked.push(`${this.download} ${this.href}`);
+    });
 
     saveFile('synthetic.html', new Blob(['x'], { type: 'text/html' }));
 
     expect(clicked).toEqual(['synthetic.html blob:synthetic']);
-    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
     vi.advanceTimersByTime(OBJECT_URL_REVOKE_DELAY_MS);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic');
+    expect(revoke).toHaveBeenCalledWith('blob:synthetic');
   });
 });

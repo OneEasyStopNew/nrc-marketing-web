@@ -15,17 +15,18 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await lightTheme(page);
 });
-test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
+test.afterEach(() => {
+  expect(pageErrors, 'page errors').toEqual([]);
+});
 
 const SEEDED = '/marketing/create/sim-cr-0001';
 const preview = (page: Page) => page.getByRole('region', { name: 'Post preview' });
-const ALT = /^Generated image for the brief: .+ \(simulation placeholder\)$/;
+const ALT = /^Generated image for the brief: .+ \(placeholder picture\)$/;
 const image = (page: Page) => preview(page).getByRole('img', { name: ALT });
 /** The preview's status region: mounted for the component's life, so screen readers announce each change. */
 const status = (page: Page) => preview(page).locator('[role="status"][data-image-status]');
 /** Visible text only: the status region repeats the notice titles for screen readers. */
-const shown = (page: Page, text: string | RegExp) =>
-  seen(page, text).and(page.locator(':not([role="status"]):not([role="status"] *)'));
+const shown = (page: Page, text: string | RegExp) => seen(page, text).and(page.locator(':not([role="status"]):not([role="status"] *)'));
 
 /** The image is on screen and the browser actually drew it. */
 async function expectDrawn(page: Page) {
@@ -41,13 +42,13 @@ async function simulate(page: Page, tool: string) {
 test('the seeded draft shows its image with where it came from', async ({ page }) => {
   await signInAt(page, `${SEEDED}/preview`, 'creator');
   await expectDrawn(page);
-  await expect(seen(page, 'Simulation, not a real generated image')).toBeVisible();
+  await expect(seen(page, 'Placeholder picture, not a generated image')).toBeVisible();
   await expect(seen(page, /1080×1080 · .* · Checksum 515151515151/)).toBeVisible();
 
   // The composer shows the same image with its provenance under it.
   await page.getByRole('link', { name: 'Back to the draft' }).click();
   await expect(page.getByRole('img', { name: ALT })).toBeVisible();
-  await expect(seen(page, 'Simulation, not a real generated image')).toBeVisible();
+  await expect(seen(page, 'Placeholder picture, not a generated image')).toBeVisible();
   await expect(seen(page, /Checksum 515151515151/)).toBeVisible();
 });
 

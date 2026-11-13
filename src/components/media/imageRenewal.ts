@@ -22,11 +22,7 @@ export interface RenewalState {
 }
 
 export type RenewalEvent =
-  | { type: 'loaded' }
-  | { type: 'load_failed' }
-  | { type: 'renewed' }
-  | { type: 'renew_failed' }
-  | { type: 'retry' };
+  { type: 'loaded' } | { type: 'load_failed' } | { type: 'renewed' } | { type: 'renew_failed' } | { type: 'retry' };
 
 export const initialRenewal: RenewalState = { phase: 'loading', autoRenewUsed: false, attempt: 0 };
 

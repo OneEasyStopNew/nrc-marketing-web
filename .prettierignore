@@ -1,0 +1,16 @@
+dist
+coverage
+playwright-report
+e2e-results
+package-lock.json
+# Generated: npm run gen:api
+src/api/schemas.gen.ts
+src/api/openapi.json
+# Local dummy data, git-ignored and never committed
+src/mocks/data.ts
+# The earlier design system, kept for reference only
+design-system
+*.tmp.json
+# NRC-30: the report is built from `html` tagged templates; Prettier would reformat them as HTML and change the downloaded file
+src/pages/validation/report.ts
+src/pages/validation/report.test.ts
