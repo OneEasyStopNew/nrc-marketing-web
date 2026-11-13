@@ -167,7 +167,7 @@ export default function FinalPreview(): ReactElement {
         </Alert>
       )}
 
-      <TwoColumn>
+      <TwoColumn mainLabel="Post preview" sideLabel="Preview details">
         <section aria-label="Post preview"><VStack gap={4}>
           {/* Provenance is in "What this preview is", so the image shows without its caption here. */}
           <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full

@@ -216,7 +216,7 @@ function Workspace() {
       </span></VisuallyHidden>
       <Verdict run={r} stale={stale} />
 
-      <TwoColumn>
+      <TwoColumn mainLabel="Validation summary" sideLabel="Findings">
         <VStack gap={6}>
           <Card>
             <CardHead title="Summary" icon="shield" regulatory />

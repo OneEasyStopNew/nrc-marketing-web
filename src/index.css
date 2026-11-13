@@ -16,3 +16,9 @@ body { margin: 0; background: var(--color-background-body); color: var(--color-t
 .mark-selected { outline: 2px solid var(--color-text-primary); outline-offset: 2px; }
 .diff-del { background: var(--color-error-muted); color: var(--color-on-error-muted); text-decoration: line-through; border-radius: var(--radius-inner); padding: 0 2px; }
 .diff-ins { background: var(--color-success-muted); color: var(--color-on-success-muted); text-decoration: underline; border-radius: var(--radius-inner); padding: 0 2px; }
+
+/* The other exception: two-column pages (TwoColumn) scroll each column separately (Astryx
+   LayoutContent and LayoutPanel) without visible scrollbar boxes. Wheel, touchpad
+   and keyboard scrolling still work. Astryx has no option to hide scrollbars. */
+[data-plain-scroll] { scrollbar-width: none; }
+[data-plain-scroll]::-webkit-scrollbar { display: none; }
