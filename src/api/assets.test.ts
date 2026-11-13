@@ -53,7 +53,7 @@ describe('assetReadSchema', () => {
     download_url: 'https://signed.example.test/a1?sig=x', download_url_expires_at: '2026-11-10T00:10:00+05:30',
   };
   const parse = (patch: Record<string, unknown>, allowDataImage = false) =>
-    assetReadSchema({ allowDataImage }).safeParse({ ...valid, ...patch });
+    assetReadSchema({ allowDataImage, allowLocalHttp: false }).safeParse({ ...valid, ...patch });
 
   it('accepts a body that matches the contract', () => {
     expect(parse({}).data).toEqual(valid);
@@ -76,6 +76,12 @@ describe('assetReadSchema', () => {
     expect(parse(patch).success).toBe(false);
   });
 
+  it('accepts a local S3 http link only with the dev-build rule', () => {
+    const local = { download_url: 'http://127.0.0.1:8333/nrc-local-media/a1.png?X-Amz-Signature=ab' };
+    expect(parse(local).success).toBe(false);
+    expect(assetReadSchema({ allowDataImage: false, allowLocalHttp: true }).safeParse({ ...valid, ...local }).success).toBe(true);
+  });
+
   it('accepts a data:image link only where simulation is allowed', () => {
     expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' }).success).toBe(false);
     expect(parse({ download_url: 'data:image/svg+xml;base64,PHN2Zz4=' }, true).success).toBe(true);
@@ -90,7 +96,7 @@ describe('mediaItemSchema', () => {
   };
 
   it('accepts a library item and refuses a link or size the image cannot use', () => {
-    const schema = mediaItemSchema({ allowDataImage: false });
+    const schema = mediaItemSchema({ allowDataImage: false, allowLocalHttp: false });
     expect(schema.safeParse(item).success).toBe(true);
     expect(schema.safeParse({ ...item, download_url: 'http://signed.example.test/a1' }).success).toBe(false);
     expect(schema.safeParse({ ...item, width_px: 0 }).success).toBe(false);

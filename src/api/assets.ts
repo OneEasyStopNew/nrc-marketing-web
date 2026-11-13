@@ -1,8 +1,8 @@
 import { queryOptions, useInfiniteQuery, useQuery, type InfiniteData, type UseInfiniteQueryResult, type UseQueryOptions, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 import { useSession } from '@/auth/AuthProvider';
-import { SIMULATION_BUILD } from '@/config/env';
-import { safeImageSrc } from '@/lib/safeUrl';
+import { LOCAL_HTTP_IMAGES, SIMULATION_BUILD } from '@/config/env';
+import { safeImageSrc, type ImageSrcRules } from '@/lib/safeUrl';
 import { isApiError } from './errors';
 import { http } from './http';
 import * as S from './schemas.gen';
@@ -21,18 +21,13 @@ export type MediaPage = S.MediaPage;
 const MEDIA_PAGE_SIZE = 50;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-interface ImageChecks {
-  /** The simulation's data:image placeholders are drawable only in a simulation build. */
-  allowDataImage: boolean;
-}
-
 // What the contract cannot say but the screens rely on: the link becomes an <img src>, the size a frame ratio.
-const imageLink = (checks: ImageChecks): z.ZodNullable<z.ZodString> =>
+const imageLink = (checks: ImageSrcRules): z.ZodNullable<z.ZodString> =>
   z.string().refine((v) => safeImageSrc(v, checks) !== null, 'unexpected image link scheme').nullable();
 const pixels = z.number().int().positive();
 
 /** S.AssetRead plus the checks the preview needs: an https link, a positive size and a full SHA-256. */
-export const assetReadSchema = (checks: ImageChecks): z.ZodType<Asset> =>
+export const assetReadSchema = (checks: ImageSrcRules): z.ZodType<Asset> =>
   S.AssetRead.extend({
     width_px: pixels,
     height_px: pixels,
@@ -42,10 +37,10 @@ export const assetReadSchema = (checks: ImageChecks): z.ZodType<Asset> =>
   });
 
 /** S.MediaItem with the same link and size checks: the library draws these links too. */
-export const mediaItemSchema = (checks: ImageChecks): z.ZodType<MediaItem> =>
+export const mediaItemSchema = (checks: ImageSrcRules): z.ZodType<MediaItem> =>
   S.MediaItem.extend({ width_px: pixels, height_px: pixels, download_url: imageLink(checks) });
 
-const BUILD_CHECKS: ImageChecks = { allowDataImage: SIMULATION_BUILD };
+const BUILD_CHECKS: ImageSrcRules = { allowDataImage: SIMULATION_BUILD, allowLocalHttp: LOCAL_HTTP_IMAGES };
 const AssetReadChecked = assetReadSchema(BUILD_CHECKS);
 const MediaPageChecked = S.MediaPage.extend({ items: z.array(mediaItemSchema(BUILD_CHECKS)) });
 

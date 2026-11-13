@@ -33,8 +33,9 @@ describe('isAppPath', () => {
 });
 
 describe('safeImageSrc', () => {
-  const real = { allowDataImage: false };
-  const sim = { allowDataImage: true };
+  const real = { allowDataImage: false, allowLocalHttp: false };
+  const sim = { allowDataImage: true, allowLocalHttp: false };
+  const dev = { allowDataImage: true, allowLocalHttp: true };
 
   it('keeps an https link exactly as sent, so a signed query string is not re-encoded', () => {
     const signed = 'https://bucket.example.test/a1.png?X-Amz-Signature=ab%2Fcd&X-Amz-Expires=600';
@@ -51,5 +52,18 @@ describe('safeImageSrc', () => {
     const placeholder = 'data:image/svg+xml;base64,PHN2Zz4=';
     expect(safeImageSrc(placeholder, real)).toBeNull();
     expect(safeImageSrc(placeholder, sim)).toBe(placeholder);
+  });
+
+  it('allows an http link from the local S3 (localhost or 127.0.0.1) only in a dev build', () => {
+    for (const local of ['http://127.0.0.1:8333/nrc-local-media/a1.png?X-Amz-Signature=ab', 'http://localhost:8333/nrc-local-media/a1.png']) {
+      expect(safeImageSrc(local, dev), local).toBe(local);
+      expect(safeImageSrc(local, real), local).toBeNull();
+    }
+  });
+
+  it('still refuses http links to any other host in a dev build', () => {
+    for (const bad of ['http://bucket.example.test/a1.png', 'http://127.0.0.1.example.test/a1.png', 'http://localhost.example.test/a1.png', 'http://10.0.0.5:8333/a1.png']) {
+      expect(safeImageSrc(bad, dev), bad).toBeNull();
+    }
   });
 });

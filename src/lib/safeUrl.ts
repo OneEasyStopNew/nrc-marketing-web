@@ -26,13 +26,22 @@ export function safeExternalHref(dest: string): string | null {
  */
 export const isAppPath = (dest: string): boolean => dest.startsWith('/') && !dest.startsWith('//') && !dest.includes('\\');
 
+// The local S3 (SeaweedFS from the API's docker compose) serves plain http on this machine only.
+const LOCAL_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1']);
+
+export interface ImageSrcRules {
+  /** The simulation's `data:image/` placeholders. */
+  allowDataImage: boolean;
+  /** http links to localhost / 127.0.0.1, for a dev build talking to the local S3. */
+  allowLocalHttp: boolean;
+}
+
 /**
  * An image source from the server (a signed `download_url`), or null when it must not be drawn.
- * Only https; the simulation's `data:image/` placeholders only where simulation is allowed.
- * Checked with `URL`, but the original text is returned: re-serialising a signed link could
- * re-encode its signature and break it.
+ * Only https, plus what `rules` allows. Checked with `URL`, but the original text is returned:
+ * re-serialising a signed link could re-encode its signature and break it.
  */
-export function safeImageSrc(src: string, { allowDataImage }: { allowDataImage: boolean }): string | null {
+export function safeImageSrc(src: string, { allowDataImage, allowLocalHttp }: ImageSrcRules): string | null {
   let url: URL;
   try {
     url = new URL(src);
@@ -42,5 +51,6 @@ export function safeImageSrc(src: string, { allowDataImage }: { allowDataImage: 
   }
   if (url.protocol === 'https:') return src;
   if (allowDataImage && url.protocol === 'data:' && src.startsWith('data:image/')) return src;
+  if (allowLocalHttp && url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname)) return src;
   return null;
 }
