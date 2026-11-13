@@ -18,6 +18,7 @@ import type { Creative, Versioned } from '@/api/creatives';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/ui/Card';
+import { GeneratedImagePreview } from '@/components/media/GeneratedImagePreview';
 import { Icon } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Overlay';
 import { fmtDateTime } from '@/lib/utils';
@@ -110,8 +111,8 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
   tenantName: string;
   caption: string;
   format?: PostFormat;
-  /** The stored image, once there is one. */
-  image?: { src: string; alt: string };
+  /** The stored image, once there is one: shown through the API, with its link renewed when it expires. */
+  image?: { assetId: string; alt: string; provenance?: boolean };
   /** Final preview: the caption is never shortened. */
   full?: boolean;
 }): ReactElement {
@@ -137,18 +138,18 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
           </Text>
         </VStack>
       </Section>
-      <AspectRatio ratio={ratio} fit="cover">
-        {image
-          ? <img src={image.src} alt={image.alt} />
-          : (
+      {image
+        ? <GeneratedImagePreview assetId={image.assetId} alt={image.alt} ratio={ratio} provenance={image.provenance} />
+        : (
+          <AspectRatio ratio={ratio} fit="cover">
             <Center axis="both" height="100%" padding={6}>
               <VStack gap={2} hAlign="center">
                 <Icon name="img" size={24} color="secondary" />
                 <Text type="supporting" color="secondary" justify="center">{full ? 'No image yet. The image is generated after the brief passes validation.' : 'The image is generated from the brief after it passes validation.'}</Text>
               </VStack>
             </Center>
-          )}
-      </AspectRatio>
+          </AspectRatio>
+        )}
     </AxCard>
   );
 }

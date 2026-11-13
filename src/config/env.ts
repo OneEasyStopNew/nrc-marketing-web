@@ -30,6 +30,11 @@ export const SIMULATION_BUILD = import.meta.env.DEV || import.meta.env.VITE_ALLO
  * is nothing a build could do with this mode. No build includes its code.
  */
 export const DEVTOKEN_BUILD = import.meta.env.DEV;
+/**
+ * `npm run dev` only: image links from the local S3 (http://127.0.0.1:8333, the API's
+ * SeaweedFS) are drawn. Every build, staging and production, accepts https image links only.
+ */
+export const LOCAL_HTTP_IMAGES = import.meta.env.DEV;
 export const API_BASE_URL = trim(env.VITE_API_BASE_URL).replace(/\/$/, '');
 export const API_PREFIX = '/v1/marketing';
 

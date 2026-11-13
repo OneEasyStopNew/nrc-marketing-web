@@ -6,10 +6,12 @@ import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { useSession } from '@/auth/AuthProvider';
-import { assetsApi, isPlaceholderImage, manifestForDownload, shortHash, useAsset, useDraftExport } from '@/api/assets';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
+import { useAuth, useSession } from '@/auth/AuthProvider';
+import { assetDenied, assetKeys, assetsApi, manifestForDownload, useAsset, useDraftExport } from '@/api/assets';
 import { creativesApi, latestValidation } from '@/api/creatives';
+import { http } from '@/api/http';
 import { isApiError } from '@/api/errors';
 import { isInProgress, passedAssessedChecks } from '@/api/validations';
 import { Badge } from '@/components/ui/Badge';
@@ -17,6 +19,10 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, SkeletonRows, TwoColumn } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
+import { AssetProvenance } from '@/components/media/GeneratedImagePreview';
+import { imageAltForBrief } from '@/components/media/imageAlt';
+import { runImageSimulation } from './imageSimulation';
+import { SIMULATION_BUILD } from '@/config/env';
 import { fmtDateTime } from '@/lib/utils';
 import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
@@ -27,9 +33,14 @@ import { formatLabel, languageLabel, PostPreview } from './parts';
  * be posted, with what it was checked against, and the review-draft export.
  * It stays a "Draft for review": reviewer approval is a later, separate step.
  */
+// The simulation endpoint only acknowledges.
+const SIM_ACK = z.object({ ok: z.literal(true) });
+
 export default function FinalPreview(): ReactElement {
   const { creativeId = '' } = useParams();
   const { context } = useSession();
+  const { mode } = useAuth();
+  const qc = useQueryClient();
   const { toast } = useToast();
   const q = useQuery({
     queryKey: ['creative-preview', context.tenant.tenant_id, creativeId],
@@ -42,6 +53,8 @@ export default function FinalPreview(): ReactElement {
   const pkg = useDraftExport(creative && !creative.asset_id ? creative.id : undefined, creative?.version);
   const assetId = creative?.asset_id ?? pkg.data?.image.asset_id ?? null;
   const asset = useAsset(assetId);
+  // An image the API now refuses is not described from the cache either.
+  const image = assetDenied(asset.error) ? undefined : asset.data;
   const listed = creative ? latestValidation(creative) ?? pkg.data?.latest_validation ?? undefined : undefined;
   const known = creative && !listed ? knownRuns(context.tenant.tenant_id, creative.id)[0] : undefined;
   const run = useValidationRun(listed?.validation_run_id ?? known?.id);
@@ -73,7 +86,7 @@ export default function FinalPreview(): ReactElement {
   const fullRun = latest && run.data?.validation_run_id === latest.validation_run_id ? run.data : undefined;
   const passed = !!current && !!fullRun && fullRun.is_current && passedAssessedChecks(fullRun);
   const studyChanged = !!study && study.version !== creative.study_snapshot_version;
-  const imageAfterEdit = !!asset.data && Date.parse(creative.updated_at) > Date.parse(asset.data.created_at);
+  const imageAfterEdit = !!image && Date.parse(creative.updated_at) > Date.parse(image.created_at);
 
   const download = async () => {
     setExporting(true);
@@ -95,6 +108,16 @@ export default function FinalPreview(): ReactElement {
     } finally {
       setExporting(false);
     }
+  };
+
+  // Simulation only: the fake API answers the next image request this way, then the image is asked for again.
+  const simulateImage = async (kind: string, done: string): Promise<void> => {
+    if (!assetId) return; // the tools render only when the draft has an image
+    await runImageSimulation({
+      setMode: async (mode) => { await http.post('/__sim/next-image-link', SIM_ACK, { mode }); },
+      refreshImage: () => qc.invalidateQueries({ queryKey: assetKeys.detail(context.tenant.tenant_id, assetId) }),
+      toast,
+    }, kind, done);
   };
 
   const validation: ReactNode = !latest
@@ -138,13 +161,9 @@ export default function FinalPreview(): ReactElement {
 
       <TwoColumn>
         <section aria-label="Post preview"><VStack gap={4}>
-          {assetId && asset.isPending
-            ? <Card><SkeletonRows rows={6} /></Card>
-            : (
-              <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
-                image={asset.data?.download_url ? { src: asset.data.download_url, alt: `Image for version ${creative.version} of this draft${isPlaceholderImage(asset.data) ? ' (placeholder picture)' : ''}` } : undefined} />
-            )}
-          {asset.isError && <Alert tone="waiting" title="The image could not be loaded">The rest of the preview is still exact.</Alert>}
+          {/* Provenance is in "What this preview is", so the image shows without its caption here. */}
+          <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
+            image={assetId ? { assetId, alt: imageAltForBrief(creative.current_prompt), provenance: false } : undefined} />
         </VStack></section>
 
         <VStack gap={4}>
@@ -164,17 +183,9 @@ export default function FinalPreview(): ReactElement {
                 </Pair>
                 <Pair k="Policy rules">{fullRun?.policy_bundle_version != null ? `version ${fullRun.policy_bundle_version}` : <Text type="body" color="secondary">Not reported</Text>}</Pair>
                 <Pair k="Image">
-                  {!asset.data ? <Text type="body" color="secondary">None yet</Text> : (
-                    <VStack gap={0.5}>
-                      <Text type="body">
-                        {asset.data.origin === 'generated' ? 'Generated' : 'Uploaded'}
-                        {asset.data.provider && <> by {asset.data.provider}{asset.data.model && ` (${asset.data.model})`}</>}
-                        {' · '}{asset.data.width_px}×{asset.data.height_px} · {fmtDateTime(asset.data.created_at)}
-                        {isPlaceholderImage(asset.data) && ' · placeholder picture, not a generated image'}
-                      </Text>
-                      <Text type="supporting" color="secondary">Reference {shortHash(asset.data.checksum_sha256)}</Text>
-                    </VStack>
-                  )}
+                  {image
+                    ? <AssetProvenance asset={image} />
+                    : <Text type="body" color="secondary">{!assetId ? 'None yet' : asset.isPending ? 'Loading' : 'Not available'}</Text>}
                 </Pair>
               </MetadataList>
             </CardBody>
@@ -186,6 +197,18 @@ export default function FinalPreview(): ReactElement {
               <CardBody>
                 <Text type="body" color="secondary">Must appear exactly as written. Shown in full.</Text>
                 {study.facts.required_disclosures.map((t, i) => <Text key={i} type="body" wordBreak="break-word">{t}</Text>)}
+              </CardBody>
+            </Card>
+          )}
+
+          {SIMULATION_BUILD && mode === 'simulation' && assetId && (
+            <Card>
+              <CardHead title="Simulation tools" icon="warn" />
+              <CardBody>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('expired', 'The image link expired')}>Expire the image link</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('expired-twice', 'The image link expired, and the next one too')}>Expire the image link twice</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('unavailable', 'The image link expired and storage is not answering')}>Expire the link with storage unavailable</Button>
+                <Button variant="ghost" size="sm" onClick={() => void simulateImage('other-organisation', 'The image now belongs to another organisation')}>Move the image to another organisation</Button>
               </CardBody>
             </Card>
           )}

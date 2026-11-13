@@ -21,7 +21,12 @@ export const IN_DEVELOPMENT = {
   accounts: true,
   /** Adding, editing, activating and retiring rules (NRC-20): the demo is read-only. */
   ruleEditing: true,
-  /** Uploading and removing media (NRC-18): "user upload remains later". */
+  /**
+   * Uploading and removing media (NRC-18): "user upload remains later". Owner: Firoz.
+   * Set to false when the backend upload (NRC-3) and media archive endpoints are live. Then the
+   * Upload and Remove dialogs in MediaPage.tsx run again: update the IN_DEVELOPMENT.mediaUpload
+   * branch in e2e/workspace.spec.ts, and the "media-upload" layout audit then covers the real dialog.
+   */
   mediaUpload: true,
   /** Video in the media library (NRC-18): "video remains later". */
   mediaVideo: true,

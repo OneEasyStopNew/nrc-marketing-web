@@ -41,7 +41,7 @@ test('a passed brief can be generated; the job survives a reload and the image c
   await page.locator('li button', { hasText: 'Marketing creator' }).click();
   await page.waitForURL((u) => u.pathname === SEEDED);
   await expect(seen(page, 'Image ready')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('img', { name: /Image for this draft \(placeholder picture\)/ })).toBeVisible();
+  await expect(page.getByRole('img', { name: /^Generated image for the brief: .+ \(placeholder picture\)$/ })).toBeVisible();
 
   await page.getByRole('button', { name: 'Check image' }).click();
   await expect(page).toHaveURL(/\/marketing\/validation\/sim-cr-0001\//);

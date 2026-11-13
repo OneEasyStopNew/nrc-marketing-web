@@ -22,6 +22,8 @@ export const mockServer = {
   failNextWrite: false,
   /** Set by the simulation tools: how the next validation run fails. */
   nextValidationFailure: null as null | 'timeout' | 'extraction',
+  /** Set by the simulation tools: how the next image requests are answered, one entry per request. */
+  nextImageLinks: [] as ('expired' | 'unavailable' | 'other-organisation')[],
   /** Create requests already handled: `${tenant}:${Idempotency-Key}` → payload and the draft it made. */
   idempotency: new Map<string, { payload: string; id: string }>(),
 
