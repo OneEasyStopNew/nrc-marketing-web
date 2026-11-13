@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHead } from '@/components/ui/Card';
 import { Icon } from '@/components/ui/Icon';
 import { Alert, EmptyState, PageHeader, SkeletonRows } from '@/components/ui/Misc';
-import { fmtDateTime } from '@/lib/utils';
+import { fmtDateTime, stagingLabel } from '@/lib/utils';
 import { GATE_LABEL, QueryState, SectionTitle, SeverityBadge } from '@/pages/shared/ui';
 import {
   filterFromParams,
@@ -117,7 +117,7 @@ function PolicyView({ policy: p }: { policy: PolicyBundle }): ReactElement {
         <SectionTitle title="Active policy" description="New validation runs use this version." />
         <Card aria-label="Active policy">
           <CardHead
-            title={p.name}
+            title={stagingLabel(p.name)}
             icon="shield"
             badge={
               <HStack gap={2} vAlign="center" wrap="wrap">
@@ -127,7 +127,7 @@ function PolicyView({ policy: p }: { policy: PolicyBundle }): ReactElement {
             }
           />
           {p.is_synthetic && (
-            <Alert tone="waiting" title="Synthetic demo rules">
+            <Alert tone="waiting" title="Synthetic staging rules">
               These are not the approved IPB rules. Do not rely on them for real content.
             </Alert>
           )}
