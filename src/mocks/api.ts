@@ -34,6 +34,12 @@ interface MockRequest {
 type Handler = (req: MockRequest) => Response | Promise<Response>;
 
 /** "GET /creatives/:id" style keys; `:name` segments become params. */
+// Visibly fake: the real API sends a UUID, and the client checks for one (NRC-20).
+const SIM_POLICY_BUNDLE_ID = '00000000-0000-4000-8000-00000000b001';
+// NRC-20 "Policy setup required": tenants listed in NO_ACTIVE_POLICY_TENANTS have none.
+const hasActivePolicy = (data: MockData, tenantId: string | null | undefined): boolean =>
+  !!tenantId && !(data.NO_ACTIVE_POLICY_TENANTS ?? []).includes(tenantId);
+
 const ROUTES: Record<string, Handler> = {
   'GET /me': ({ data, user }) => {
     const me: MeWire = {
@@ -55,10 +61,10 @@ const ROUTES: Record<string, Handler> = {
       studies: data.STUDIES[tenant.tenant_id] ?? [],
       languages: data.LANGUAGES,
       post_formats: data.POST_FORMATS,
-      active_policy: {
-        policy_bundle_id: 'sim-policy-bundle', version: data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
+      active_policy: hasActivePolicy(data, tenant.tenant_id) ? {
+        policy_bundle_id: SIM_POLICY_BUNDLE_ID, version: data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
         is_synthetic: true, rule_count: data.VALIDATION_RULES.length,
-      },
+      } : null,
     };
     return json(200, ctx);
   },
@@ -67,8 +73,9 @@ const ROUTES: Record<string, Handler> = {
   'GET /policies/active': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
+    if (!hasActivePolicy(req.data, req.tenantId)) return problem(404, 'NOT_FOUND', 'This organisation has no active policy.');
     const bundle: Schemas['PolicyBundleRead'] = {
-      policy_bundle_id: 'sim-policy-bundle', version: req.data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
+      policy_bundle_id: SIM_POLICY_BUNDLE_ID, version: req.data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
       source_ref: 'simulation', is_synthetic: true, approved_by: 'simulation', approved_at: '2026-11-01T00:00:00Z',
       rules: req.data.VALIDATION_RULES.map((r) => ({
         rule_id: r.rule_id, rule_version: r.rule_version, title: r.explanation, requirement: r.explanation,

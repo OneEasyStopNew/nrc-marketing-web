@@ -111,6 +111,12 @@ export interface MockData {
   WORKSPACE: Record<string, MockWorkspace>;
   /** Policy bundle version the fake validator reports. */
   POLICY_BUNDLE_VERSION: number;
+  /**
+   * Tenant ids with no active policy (NRC-20 "Policy setup required"). For these,
+   * GET /context reports active_policy: null and GET /policies/active answers
+   * 404 NOT_FOUND. Optional so data.ts files without it still compile.
+   */
+  NO_ACTIVE_POLICY_TENANTS?: readonly string[];
 }
 
 /**

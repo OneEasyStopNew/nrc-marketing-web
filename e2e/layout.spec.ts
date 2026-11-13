@@ -64,12 +64,15 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
   } }]),
   { name: 'accounts', open: (page) => signInAt(page, '/marketing/integrations', 'publisher') },
   { name: 'team', open: (page) => signInAt(page, '/marketing/team', 'admin') },
-  { name: 'rule-new', open: async (page) => {
-    await signInAt(page, '/marketing/rules', 'policy-admin');
+  // Rule editing is in development for the demo (NRC-20, IN_DEVELOPMENT.ruleEditing): "New rule" opens the in-development dialog.
+  ...(IN_DEVELOPMENT.ruleEditing ? [{ name: 'rule-new-in-development', open: async (page: Page) => {
+    await signInAt(page, '/marketing/rules/manage', 'policy-admin');
     await page.getByRole('button', { name: 'New rule' }).click();
-    await page.getByRole('dialog').waitFor();
+    await page.getByRole('heading', { name: 'In development: New rule' }).waitFor();
     await page.waitForTimeout(400);
-  } },
+  } }] : []),
+  { name: 'rules-active-policy', open: (page) => signInAt(page, '/marketing/rules', 'creator') },
+  { name: 'rules-setup-required', open: (page) => signInAt(page, '/marketing/rules', 'creator-no-studies') },
   { name: 'no-permission', open: (page) => signInAt(page, '/marketing/approvals', 'creator') },
   { name: 'not-found', open: (page) => signInAt(page, '/marketing/nope', 'creator') },
   { name: 'blocked', open: (page) => signInAt(page, '/marketing', 'disabled') },

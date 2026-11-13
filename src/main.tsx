@@ -8,6 +8,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { AstryxProvider } from '@/theme/AstryxProvider';
 import { AuthProvider } from '@/auth/AuthProvider';
 import { ToastProvider } from '@/components/ui/Toast';
+import { installChunkReload, sessionStorageOrNull } from '@/lib/chunkReload';
 import App from './App';
 import './index.css';
 
@@ -41,6 +42,8 @@ function Root() {
 // A data router so pages can block navigation while edits are unsaved (useBlocker).
 // App keeps its own <Routes> under this single catch-all route.
 const router = createBrowserRouter([{ path: '*', element: <Root />, errorElement: <AppCrash /> }]);
+
+installChunkReload(window, sessionStorageOrNull(), () => window.location.reload());
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

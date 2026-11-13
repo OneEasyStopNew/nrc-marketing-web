@@ -109,7 +109,7 @@ test('a publisher queues an approved post; it is never shown as published', asyn
 
 test('a policy administrator drafts a rule with its source, then activates it', async ({ page }) => {
   test.skip(IN_DEVELOPMENT.ruleEditing, 'rule editing is in development (config/inDevelopment.ts)');
-  await signInAt(page, '/marketing/rules', 'policy-admin');
+  await signInAt(page, '/marketing/rules/manage', 'policy-admin');
   await page.getByRole('button', { name: 'New rule' }).click();
   const dialog = page.getByRole('dialog', { name: 'New rule' });
   await dialog.getByRole('button', { name: 'Save draft' }).click();
@@ -127,6 +127,48 @@ test('a policy administrator drafts a rule with its source, then activates it', 
   await page.getByRole('button', { name: 'Activate' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: /Activate/ }).click();
   await expect(seen(page, /is now active$/)).toBeVisible();
+});
+
+test('rule editing controls stay visible but only open the in-development dialog', async ({ page }) => {
+  test.skip(!IN_DEVELOPMENT.ruleEditing, 'rule editing is available (config/inDevelopment.ts)');
+  // Rule administration is under /manage while the Rules section shows the read-only active policy (NRC-20).
+  await signInAt(page, '/marketing/rules/manage', 'policy-admin');
+  const notYet = async (feature: string) => {
+    // Matched by its own name: the dialog renders inside the rule drawer, which also contains its heading.
+    const dialog = page.getByRole('dialog', { name: feature });
+    await expect(dialog.getByRole('heading', { name: `In development: ${feature}` })).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox')).toHaveCount(0);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
+    await expect(dialog).toHaveCount(0);
+  };
+  const draftsTab = page.getByRole('tab', { name: /Drafts/ });
+  await expect(draftsTab).toContainText('1');
+
+  await page.getByRole('button', { name: 'New rule' }).click();
+  await notYet('New rule');
+
+  // Active rule: Edit and Retire.
+  await page.getByRole('button', { name: 'No promised results' }).click();
+  const drawer = page.getByRole('dialog', { name: 'No promised results' });
+  await drawer.getByRole('button', { name: 'Edit' }).click();
+  await notYet('Edit SIM-');
+  await drawer.getByRole('button', { name: 'Retire' }).click();
+  await notYet('Retire SIM-');
+  await page.keyboard.press('Escape');
+
+  // Draft rule: Activate. Drafts stay viewable, read-only.
+  await draftsTab.click();
+  await page.getByRole('button', { name: 'Image rights are on file' }).click();
+  await page.getByRole('dialog', { name: 'Image rights are on file' }).getByRole('button', { name: 'Activate' }).click();
+  await notYet('Activate SIM-');
+  await page.keyboard.press('Escape');
+
+  // Nothing was written: still one draft, and the active rule is unchanged.
+  await expect(draftsTab).toContainText('1');
+  await page.getByRole('tab', { name: /Active/ }).click();
+  await expect(page.getByRole('button', { name: 'No promised results' })).toBeVisible();
 });
 
 test('an administrator invites someone and changes roles; a role is always required', async ({ page }) => {
@@ -155,7 +197,7 @@ test('an administrator invites someone and changes roles; a role is always requi
 test('pages outside the role are refused, not hidden behind a blank screen', async ({ page }) => {
   await signInAt(page, '/marketing/team', 'creator');
   await expect(seen(page, 'Not available with your role')).toBeVisible();
-  await signInAt(page, '/marketing/rules', 'publisher');
+  await signInAt(page, '/marketing/rules/manage', 'publisher');
   await expect(seen(page, 'Not available with your role')).toBeVisible();
 });
 
@@ -208,7 +250,8 @@ test('features that are not planned yet show the in-development screen, not dumm
 
   // Rules: the list stays; New rule opens the in-development dialog, not the editor.
   if (IN_DEVELOPMENT.ruleEditing) {
-    await signInAt(page, '/marketing/rules', 'admin');
+    // Rule administration moved to /manage when the Rules section became the read-only viewer (NRC-20).
+    await signInAt(page, '/marketing/rules/manage', 'admin');
     await expect(h1(page)).toHaveText('Rules');
     await expect(page.getByRole('table')).toBeVisible();
     await page.getByRole('button', { name: 'New rule' }).click();
