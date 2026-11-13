@@ -75,13 +75,15 @@ export default defineConfig(({ mode, command }) => ({
   // the in-memory sign-in).
   // The Lottie player is imported on demand by a deep path the scan does not
   // pre-bundle; found at runtime, it would reload the tab the same way.
-  optimizeDeps: { entries: ['index.html', 'src/**/*.tsx'], include: ['lottie-web/build/player/lottie_light'] },
+  // Test files are not pages: their Node-only imports (msw/node) must stay out of the browser bundle.
+  optimizeDeps: { entries: ['index.html', 'src/**/*.tsx', '!src/**/*.test.tsx'], include: ['lottie-web/build/player/lottie_light'] },
   build: {
     // Source maps stay out of the public bundle; upload them to error tracking separately if needed.
     sourcemap: false,
   },
   test: {
-    include: ['src/**/*.test.ts'],
+    // Hook and component tests are .test.tsx and opt into jsdom per file.
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 }));

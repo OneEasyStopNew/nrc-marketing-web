@@ -65,3 +65,37 @@ test('an edit turns generation off until the new version is validated', async ({
   await expect(generate(page)).toBeDisabled();
   await expect(seen(page, 'Save your changes, then validate this version.').first()).toBeVisible();
 });
+
+/**
+ * Jobs the fake API has made in this tab. Simulation replaces fetch inside the
+ * page, so Playwright's network events never see API calls; the fake API's
+ * stored jobs are the reliable count of what the backend would hold.
+ */
+const storedJobIds = (page: Page) =>
+  page.evaluate(() => (JSON.parse(sessionStorage.getItem('nrc.sim.jobs') ?? '[]') as { job_id: string }[]).map((j) => j.job_id));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+test('a double click starts one job, with a UUID like the API issues', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  await expect(generate(page)).toBeEnabled();
+  await generate(page).dblclick();
+  await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
+  const ids = await storedJobIds(page);
+  expect(ids).toHaveLength(1);
+  expect(ids[0]).toMatch(UUID);
+});
+
+test('a tampered job reference in this tab is ignored, and Generate stays available', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  await expect(generate(page)).toBeEnabled();
+  // A job id that is not a UUID must never reach a request path.
+  await page.evaluate(() => sessionStorage.setItem(
+    Object.keys(sessionStorage).find((k) => k.startsWith('nrc.job.')) ?? 'nrc.job.x.sim-cr-0001',
+    JSON.stringify({ job_id: '../../admin', version: 3 }),
+  ));
+  await page.reload();
+  await page.locator('li button', { hasText: 'Marketing creator' }).click();
+  await page.waitForURL((u) => u.pathname === SEEDED);
+  await expect(generate(page)).toBeEnabled();
+  expect(await storedJobIds(page)).toHaveLength(0);
+});

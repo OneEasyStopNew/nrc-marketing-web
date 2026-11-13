@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { skipToken, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 import { useSession } from '@/auth/AuthProvider';
 import { useAsset, useDraftExport, type Asset } from '@/api/assets';
 import { creativesApi, currentValidation, latestValidation, type Creative, type GenerationEligibility, type ValidationKind, type ValidationRunSummary } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
-import { isJobDone, jobsApi, newJobKey, type Job } from '@/api/jobs';
+import { isJobDone, isJobUnsettled, isUuid, jobKeys, jobsApi, newJobKey, type Job } from '@/api/jobs';
 import { isInProgress } from '@/api/validations';
 import { useToast } from '@/components/ui/Toast';
 import { knownRuns } from '@/pages/validation/knownRuns';
-import { pollDelay, useValidationRun } from '@/pages/validation/useValidation';
+import { useValidationRun } from '@/pages/validation/useValidation';
+import { commandAfterProblem, commandFor, jobPollDelay, jobPollingExpired, startProblem, UNEXPECTED_PROBLEM, type PendingCommand } from './generationRules';
+
+/** Eligibility query keys: both the query and the refusal that re-reads it use these. */
+const eligibilityKeys = {
+  creative: (tenantId: string, creativeId: string | undefined) => ['eligibility', tenantId, creativeId] as const,
+  version: (tenantId: string, creativeId: string | undefined, version: number | undefined) =>
+    [...eligibilityKeys.creative(tenantId, creativeId), version] as const,
+};
 
 /* ---------- The three checks of a draft version ---------- */
 
@@ -78,9 +86,10 @@ export function useDraftChecks(creative: Creative | undefined, editing: boolean,
   const image = useValidationRun(refFor('image')?.id);
 
   const eligibility = useQuery({
-    queryKey: ['eligibility', tenantId, creative?.id, creative?.version],
-    queryFn: ({ signal }) => creativesApi.generationEligibility(creative!.id, signal),
-    enabled: !!creative && !editing,
+    queryKey: eligibilityKeys.version(tenantId, creative?.id, creative?.version),
+    // skipToken instead of `creative!` (JS-13): no draft yet means nothing to ask.
+    queryFn: creative ? ({ signal }) => creativesApi.generationEligibility(creative.id, signal) : skipToken,
+    enabled: !editing,
     staleTime: 0,
     retry: false,
   });
@@ -108,7 +117,8 @@ export function useDraftChecks(creative: Creative | undefined, editing: boolean,
 /* ---------- The image of a draft version, and generating it ---------- */
 
 const jobKey = (tenantId: string, creativeId: string) => `nrc.job.${tenantId}.${creativeId}`;
-const JobRefSchema = z.object({ job_id: z.string(), version: z.number().int() });
+// The stored id goes into a path, so it must be a UUID like the API issues (JS-58).
+const JobRefSchema = z.object({ job_id: z.string().refine(isUuid), version: z.number().int() });
 type JobRef = z.infer<typeof JobRefSchema>;
 
 /** The job this tab started for a draft, if a valid one is stored (JS-14, JS-59). */
@@ -125,7 +135,16 @@ const readJob = (k: string): JobRef | null => {
 export interface Generation {
   /** The job for the current version, if this tab started one. */
   job: Job | undefined;
+  /** The job is still working (queued, running, waiting on the provider, stopping). */
   active: boolean;
+  /** The job waits on reconciliation or a person (UNKNOWN, NEEDS_REVIEW): Generate stays off. */
+  unsettled: boolean;
+  /** Automatic checking stopped for an unfinished job that is past the polling window. */
+  pollingStopped: boolean;
+  /** Reads the job once, on demand. Never starts a job. */
+  checkAgain: () => void;
+  /** A read of the job is in flight. */
+  checking: boolean;
   starting: boolean;
   start: () => Promise<void>;
   assetId: string | null;
@@ -152,16 +171,22 @@ export function useGeneration(creative: Creative | undefined): Generation {
   const [ref, setRef] = useState<JobRef | null>(() => (storeKey ? readJob(storeKey) : null));
   const [starting, setStarting] = useState(false);
   /** Same key while the same request is retried; a new one for a new generation. */
-  const pending = useRef<{ sig: string; key: string } | null>(null);
+  const pending = useRef<PendingCommand | null>(null);
+  // Set synchronously, so a second click in the same frame is ignored before React re-renders.
+  const inFlight = useRef(false);
+  // Aborted when the page goes away, so a late answer changes nothing.
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
 
+  const jobId = ref?.job_id;
   const jobQ = useQuery({
-    queryKey: ['job', tenantId, ref?.job_id],
-    queryFn: ({ signal }) => jobsApi.get(ref!.job_id, signal),
-    enabled: !!ref,
+    queryKey: jobKeys.detail(tenantId, jobId),
+    // skipToken: no stored job means nothing to read, and no `ref!` to trust (JS-13).
+    queryFn: jobId ? ({ signal }) => jobsApi.get(jobId, signal) : skipToken,
     refetchInterval: (q) => {
       const j = q.state.data;
-      if (!j || q.state.error || isJobDone(j.state)) return false;
-      return Math.min(pollDelay(q.state.dataUpdateCount), 2500);
+      if (!j || q.state.error) return false;
+      return jobPollDelay(j, q.state.dataUpdateCount, q.state.dataUpdatedAt);
     },
     staleTime: 0,
     retry: (count, e) => !(isApiError(e) && !e.retryable) && count < 2,
@@ -170,7 +195,9 @@ export function useGeneration(creative: Creative | undefined): Generation {
   const jobGone = isApiError(jobQ.error) && jobQ.error.kind === 'not_found';
   const job: Job | undefined = jobGone ? undefined : jobQ.data;
   const forCurrent = !!job && !!creative && job.creative_version === creative.version;
-  const active = forCurrent && !isJobDone(job.state);
+  const active = forCurrent && !isJobDone(job.state) && !isJobUnsettled(job.state);
+  const unsettled = forCurrent && isJobUnsettled(job.state);
+  const pollingStopped = forCurrent && jobPollingExpired(job, jobQ.dataUpdatedAt);
 
   const pkg = useDraftExport(creative && !creative.asset_id ? creative.id : undefined, creative?.version);
   const assetId = creative?.asset_id
@@ -186,31 +213,40 @@ export function useGeneration(creative: Creative | undefined): Generation {
     void qc.invalidateQueries({ queryKey: ['draft-export', tenantId, creativeId] });
   }, [succeeded, qc, tenantId, creativeId]);
 
+  /**
+   * Starts a job for the current version. One Idempotency-Key per intended
+   * command: after a lost answer, a timeout or a temporary failure the next
+   * Generate resends the same key, so the backend answers with the job it may
+   * already have made instead of starting (and charging for) a second one.
+   */
   const start = async () => {
-    if (!creative || starting || active) return;
-    const sig = `${creative.id}:${creative.version}`;
-    if (pending.current?.sig !== sig) pending.current = { sig, key: newJobKey() };
+    if (!creative || inFlight.current || active || unsettled) return;
+    inFlight.current = true;
+    const ctrl = new AbortController();
+    request.current = ctrl;
+    const command = commandFor(pending.current, `${creative.id}:${creative.version}`, newJobKey);
+    pending.current = command;
     setStarting(true);
     try {
-      const accepted = await jobsApi.startImage(creative.id, creative.version, pending.current.key);
+      const accepted = await jobsApi.startImage(creative.id, creative.version, command.key, ctrl.signal);
+      if (ctrl.signal.aborted) return;
       pending.current = null;
       const next = { job_id: accepted.job_id, version: creative.version };
-      try { sessionStorage.setItem(storeKey, JSON.stringify(next)); } catch { /* storage blocked: the job still runs */ }
+      try {
+        sessionStorage.setItem(storeKey, JSON.stringify(next));
+      } catch {
+        // Storage blocked: the job still runs; only a reload loses track of it.
+      }
       setRef(next);
-    } catch (e) {
-      if (!isApiError(e)) throw e;
-      if (e.kind === 'not_implemented') toast('Image generation is not available yet', 'waiting', 'The generation service is not connected in this build.');
-      // Both codes mean "this version may not be generated": the creatives API
-      // answers GENERATION_NOT_ELIGIBLE, the generation service VALIDATION_NOT_PASSED
-      // (not settled between the two backend branches yet).
-      else if (e.code === 'GENERATION_NOT_ELIGIBLE' || e.code === 'VALIDATION_NOT_PASSED') {
-        toast('This version cannot be generated yet', 'waiting', e.message);
-        void qc.invalidateQueries({ queryKey: ['eligibility', tenantId, creative.id] });
-      } else if (e.kind === 'forbidden') toast('Your role cannot generate images here', 'blocked');
-      else toast('Generation could not start', 'blocked', e.retryable ? 'Nothing was started. Try again in a moment.' : e.message);
-      if (!e.retryable) pending.current = null;
+    } catch (e: unknown) {
+      if (ctrl.signal.aborted) return; // The user left; nothing to show.
+      const p = isApiError(e) ? startProblem(e) : UNEXPECTED_PROBLEM;
+      pending.current = commandAfterProblem(command, p);
+      toast(p.title, p.sameCommand ? 'waiting' : 'blocked', p.detail);
+      if (p.recheckEligibility) void qc.invalidateQueries({ queryKey: eligibilityKeys.creative(tenantId, creative.id) });
     } finally {
-      setStarting(false);
+      inFlight.current = false;
+      if (!ctrl.signal.aborted) setStarting(false);
     }
   };
 
@@ -218,6 +254,10 @@ export function useGeneration(creative: Creative | undefined): Generation {
     /** The job for the current version, if this tab started one. */
     job: forCurrent ? job : undefined,
     active,
+    unsettled,
+    pollingStopped,
+    checkAgain: () => void jobQ.refetch(),
+    checking: jobQ.isFetching,
     starting,
     start,
     assetId,

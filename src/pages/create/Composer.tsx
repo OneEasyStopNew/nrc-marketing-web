@@ -204,8 +204,9 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
         <Step n={4} title="Image">
           {creative
             ? <GenerationStep creative={creative} editing={editing} canGenerate={can('generation:run') && !disabled}
-                eligibility={eligibility} job={gen.job} active={gen.active} starting={gen.starting}
-                onGenerate={() => void gen.start()} image={asset.data} />
+                eligibility={eligibility} job={gen.job} active={gen.active} unsettled={gen.unsettled}
+                pollingStopped={gen.pollingStopped} checking={gen.checking} onCheckAgain={gen.checkAgain}
+                starting={gen.starting} onGenerate={() => void gen.start()} image={asset.data} />
             : <Text type="body" color="secondary">The image is generated from the brief after the draft is created and the brief passes validation.</Text>}
         </Step>
 

@@ -292,13 +292,15 @@ const ROUTES: Record<string, Handler> = {
     const e = eligibilityOf(req, c, body.creative_version);
     if (!e.eligible) return problem(409, 'GENERATION_NOT_ELIGIBLE', e.message, false, { reason: e.reason });
     const format = req.data.POST_FORMATS.find((f) => f.channel === c.channel && f.post_format === c.post_format);
-    const id = `sim-job-${crypto.randomUUID().slice(0, 8)}`;
+    // A UUID like the API's: the web app refuses any other job id in a path (NRC-21).
+    const id = crypto.randomUUID();
+    const suffix = id.slice(0, 8);
     const job: MockJob = {
       job_id: id, tenant_id: c.tenant_id, creative_id: c.id, creative_version: c.version, started_ms: Date.now(),
       asset: {
-        tenant_id: c.tenant_id, asset_id: `sim-asset-${id.slice(8)}`, creative_id: c.id, origin: 'generated', mime_type: 'image/svg+xml',
+        tenant_id: c.tenant_id, asset_id: `sim-asset-${suffix}`, creative_id: c.id, origin: 'generated', mime_type: 'image/svg+xml',
         width_px: format?.width_px ?? 1080, height_px: format?.height_px ?? 1080, size_bytes: 600,
-        checksum_sha256: id.slice(8).padEnd(64, '0'), provider: 'simulation', model: 'placeholder',
+        checksum_sha256: suffix.padEnd(64, '0'), provider: 'simulation', model: 'placeholder',
         created_at: new Date(Date.now() + JOB_DONE_MS).toISOString(),
       },
     };
