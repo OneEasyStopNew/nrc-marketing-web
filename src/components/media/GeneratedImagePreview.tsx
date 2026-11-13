@@ -81,17 +81,18 @@ function ImagePreview({
   };
 
   const drawing = !!data?.download_url && !asset.isPending && (renewal.phase === 'loading' || renewal.phase === 'shown');
+  const placeholder = (
+    <div aria-hidden data-loading="">
+      <Skeleton height="100%" radius="none" />
+    </div>
+  );
   let frame;
   if (denied) {
     frame = (
       <Notice icon="lock" title="Image not available" text="It does not exist, or it is not available to you in this organisation." />
     );
   } else if (asset.isPending || renewal.phase === 'renewing') {
-    frame = (
-      <div aria-hidden data-loading="">
-        <Skeleton height="100%" radius="none" />
-      </div>
-    );
+    frame = placeholder;
   } else if (renewal.phase === 'failed' || !data?.download_url) {
     frame = unavailable ? (
       <Notice
@@ -110,14 +111,25 @@ function ImagePreview({
     );
   } else {
     // The attempt key draws a fresh <img> for every renewed link, even when the link text is unchanged.
+    // Lazy and async: the browser fetches and decodes it only near the viewport, off the main thread.
+    // width/height give it its size before the bytes arrive, and the frame's ratio is fixed, so nothing
+    // moves when it lands. Until onLoad the placeholder sits under it in the same cell ([data-image-frame]
+    // in index.css), so the image keeps its place in the frame and the browser sees it where it is shown.
     frame = (
-      <img
-        key={renewal.attempt}
-        src={data.download_url}
-        alt={fullAlt}
-        onLoad={() => dispatch({ type: 'loaded' })}
-        onError={() => void renew('load_failed')}
-      />
+      <div data-image-frame="">
+        {renewal.phase === 'loading' && placeholder}
+        <img
+          key={renewal.attempt}
+          src={data.download_url}
+          alt={fullAlt}
+          width={data.width_px}
+          height={data.height_px}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => dispatch({ type: 'loaded' })}
+          onError={() => void renew('load_failed')}
+        />
+      </div>
     );
   }
 
