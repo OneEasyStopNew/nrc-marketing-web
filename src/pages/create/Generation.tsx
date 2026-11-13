@@ -68,7 +68,7 @@ export function GenerationStep({ creative, editing, canGenerate, eligibility, jo
             <Text type="supporting" color="secondary">
               For version {creative.version} · {image.width_px}×{image.height_px}
               {image.provider && ` · ${image.provider}${image.model ? ` (${image.model})` : ''}`}
-              {isPlaceholderImage(image) && ' · placeholder picture from the demo service, not a generated image'}
+              {isPlaceholderImage(image) && ' · placeholder picture from the staging service, not a generated image'}
             </Text>
           </HStack>
           <Text type="supporting" color="secondary">The image still needs its final validation before review. Generating it does not approve or publish anything.</Text>
