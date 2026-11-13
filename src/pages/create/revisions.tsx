@@ -194,6 +194,17 @@ export function FindingsToFix({ creative, editing }: { creative: Creative; editi
 function FindingsToFixList({ creative, runId, editing }: { creative: Creative; runId: string; editing: boolean }) {
   const q = useValidationRun(runId);
   const run = q.data;
+  // A run that can't be read must not look like "nothing to fix" (e.g. a response that fails the contract).
+  if (q.isError) {
+    return (
+      <section aria-label="Findings to fix"><VStack gap={2}><Divider />
+        <Alert tone="blocked" title="The findings to fix could not be loaded"
+          action={<Button size="sm" variant="secondary" icon="refresh" onClick={() => void q.refetch()}>Try again</Button>}>
+          The last validation may still have findings for this draft. Try again before you rely on this list.
+        </Alert>
+      </VStack></section>
+    );
+  }
   if (!run || isInProgress(run.state) || run.state === 'FAILED' || run.state === 'CANCELLED') return null;
   const unassessed = unassessedMandatory(run);
   if (!run.findings.length && !unassessed.length) return null;

@@ -23,10 +23,12 @@ import { AssetProvenance } from '@/components/media/GeneratedImagePreview';
 import { imageAltForBrief } from '@/components/media/imageAlt';
 import { runImageSimulation } from './imageSimulation';
 import { SIMULATION_BUILD } from '@/config/env';
+import { saveFile } from '@/lib/download';
 import { fmtDateTime } from '@/lib/utils';
 import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
 import { formatLabel, languageLabel, PostPreview } from './parts';
+import { useValidationReport } from './useValidationReport';
 
 /**
  * /marketing/create/:creativeId/preview: the exact saved version as it would
@@ -60,6 +62,13 @@ export default function FinalPreview(): ReactElement {
   const run = useValidationRun(listed?.validation_run_id ?? known?.id);
   const latest = listed ?? run.data;
   const [exporting, setExporting] = useState(false);
+  // What the preview resolved above, so the report describes the same run and image (even an image that failed to load).
+  const report = useValidationReport({
+    creativeId,
+    version: creative?.version ?? 0,
+    runId: listed?.validation_run_id ?? known?.id,
+    asset: assetId ? { id: assetId, checksumSha256: image?.checksum_sha256 ?? null } : undefined,
+  });
 
   const draftLink = `/marketing/create/${encodeURIComponent(creativeId)}`;
   const crumbs = [{ label: 'Create post', to: '/marketing/create' }, { label: 'Draft', to: draftLink }, { label: 'Final preview' }];
@@ -93,12 +102,7 @@ export default function FinalPreview(): ReactElement {
     try {
       const manifest = await assetsApi.exportDraft(creative.id);
       const blob = new Blob([JSON.stringify(manifestForDownload(manifest), null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nrc-review-draft-${creative.id}-v${manifest.creative_version}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      saveFile(`nrc-review-draft-${creative.id}-v${manifest.creative_version}.json`, blob);
       toast(`Review draft for version ${manifest.creative_version} downloaded`, 'done', 'It is marked DRAFT. It is not an approval.');
     } catch (e) {
       if (!isApiError(e)) throw e;
@@ -139,6 +143,10 @@ export default function FinalPreview(): ReactElement {
         actions={(
           <>
             <Button variant="secondary" href={draftLink}>Back to the draft</Button>
+            {/* Secondary: one primary per view. Disabled until a finished run exists; the Validation row says why. */}
+            <Button variant="secondary" icon="dl" loading={report.downloading} disabled={!latest || isInProgress(latest.state)} onClick={() => void report.download()}>
+              Download validation report
+            </Button>
             <Button variant="primary" icon="dl" loading={exporting} disabled={!assetId} onClick={() => void download()}>
               Download review draft
             </Button>

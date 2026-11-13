@@ -1,3 +1,4 @@
+import { ApiError } from './errors';
 import { http, requestWithMeta } from './http';
 import * as S from './schemas.gen';
 
@@ -30,13 +31,24 @@ export const GATES: readonly Gate[] = ['completeness', 'study_facts', 'policy', 
 /** A new key per intended run; the same key when retrying the same request. */
 export const newValidationKey = (): string => `validate_${crypto.randomUUID().replace(/-/g, '')}`;
 
+/** How long one read of a run may take before it is abandoned (the poll then retries). */
+export const VALIDATION_READ_TIMEOUT_MS = 15_000;
+
+// The seeded simulation run id is not a UUID yet, so ids are checked as safe non-empty text (NRC-18 does the same).
+const isSafeId = (id: string): boolean => id.trim() !== '' && !id.includes('/') && !id.includes('\\') && !id.includes('..');
+
 export const validationsApi = {
   /** Only from an explicit "Validate" action, for a saved version. */
   start: async (body: { creative_id: string; creative_version: number; input_kind: ValidationInputKind; asset_id?: string }, idempotencyKey: string): Promise<ValidationAccepted> =>
     (await requestWithMeta('POST', '/validations', S.ValidationAccepted, { body, idempotencyKey })).data,
 
-  get: (runId: string, signal?: AbortSignal): Promise<ValidationRun> =>
-    http.get(`/validations/${encodeURIComponent(runId)}`, S.ValidationRunRead, { signal }),
+  get: async (runId: string, signal?: AbortSignal): Promise<ValidationRun> => {
+    if (!isSafeId(runId)) throw new ApiError(404);
+    const timeout = AbortSignal.timeout(VALIDATION_READ_TIMEOUT_MS);
+    return http.get(`/validations/${encodeURIComponent(runId)}`, S.ValidationRunRead, {
+      signal: AbortSignal.any(signal ? [signal, timeout] : [timeout]),
+    });
+  },
 };
 
 /**
