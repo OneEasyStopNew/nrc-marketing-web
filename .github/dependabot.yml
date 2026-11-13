@@ -1,0 +1,25 @@
+# Update proposals for npm packages and GitHub Actions (JS-40, JS-75).
+# `cooldown` matches the 7-day release-age cooldown in .npmrc, so a freshly
+# published (possibly hijacked) version is never proposed. Security updates
+# are not delayed by the cooldown.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch updates of development tools arrive as one pull request.
+      dev-tools:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

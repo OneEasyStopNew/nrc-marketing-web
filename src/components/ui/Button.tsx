@@ -1,4 +1,4 @@
-import { isValidElement, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
+import { isValidElement, type ButtonHTMLAttributes, type ReactNode, type Ref, type ReactElement } from 'react';
 import { Button as AxButton } from '@astryxdesign/core/Button';
 import { Icon, type IconName } from './Icon';
 
@@ -51,7 +51,7 @@ function textOf(node: ReactNode): string {
 export function Button({
   variant = 'secondary', size = 'md', icon, iconOnly, pill: _pill, block, loading, active, tip, className: _className, children,
   disabled, type = 'button', href, ref, 'aria-label': ariaLabel, ...props
-}: ButtonProps) {
+}: ButtonProps): ReactElement {
   const label = ariaLabel ?? textOf(children);
   return (
     <AxButton

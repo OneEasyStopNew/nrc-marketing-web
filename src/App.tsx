@@ -1,5 +1,6 @@
 import { SIMULATION_BUILD } from '@/config/env';
-import { lazy, Suspense } from 'react';
+import { exhaustive } from '@/lib/exhaustive';
+import { lazy, Suspense, type ReactElement } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { HOME_PATH } from '@/auth/returnTo';
@@ -50,7 +51,7 @@ function SimCrash(): never {
   throw new Error('Simulated page crash');
 }
 
-export default function App() {
+export default function App(): ReactElement {
   const { status, mode } = useAuth();
 
   switch (status.kind) {
@@ -62,6 +63,7 @@ export default function App() {
     case 'blocked': return <Blocked reason={status.reason} />;
     case 'failed': return <SessionFailed message={status.message} requestId={status.requestId} retryable={status.retryable} />;
     case 'ready': break;
+    default: return exhaustive(status, <SessionFailed message="Something failed while opening Marketing. Nothing was changed." retryable />);
   }
 
   return (

@@ -1,15 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivePolicyRule } from '@/api/policies';
+import type { ActiveRule } from '@/api/policy';
 import {
-  filterFromParams, filterRules, inputsLabel, isFiltered, isMandatoryFilter, isSeverityFilter, labelFor, MANDATORY_FILTERS,
-  NO_FILTER, paramsWithFilter, POLICY_STATUS_TEXT, policyLoadState, SEVERITY_FILTERS, type PolicyFilter,
+  filterFromParams,
+  filterRules,
+  inputsLabel,
+  isFiltered,
+  isMandatoryFilter,
+  isSeverityFilter,
+  labelFor,
+  MANDATORY_FILTERS,
+  NO_FILTER,
+  paramsWithFilter,
+  POLICY_STATUS_TEXT,
+  policyLoadState,
+  SEVERITY_FILTERS,
+  type PolicyFilter,
 } from './activePolicy';
 import { ApiError } from '@/api/errors';
 
-const rule = (rule_id: string, extra: Partial<ActivePolicyRule> = {}): ActivePolicyRule => ({
-  rule_id, rule_version: 1, title: `[SYNTHETIC] ${rule_id} title`, requirement: `[SYNTHETIC] ${rule_id} requirement`,
-  gate: 'policy', severity: 'critical', mandatory: true, applies_to: ['brief'],
-  source: { source_id: 'synthetic:doc', clause: `Clause ${rule_id}`, excerpt: null }, ...extra,
+const rule = (rule_id: string, extra: Partial<ActiveRule> = {}): ActiveRule => ({
+  rule_id,
+  rule_version: 1,
+  title: `[SYNTHETIC] ${rule_id} title`,
+  requirement: `[SYNTHETIC] ${rule_id} requirement`,
+  gate: 'policy',
+  severity: 'critical',
+  mandatory: true,
+  applies_to: ['brief'],
+  source: { source_id: 'synthetic:doc', clause: `Clause ${rule_id}`, excerpt: null },
+  ...extra,
 });
 
 const RULES = [
@@ -68,11 +87,17 @@ describe('isFiltered and inputsLabel', () => {
 describe('policyLoadState', () => {
   const base = { isPending: false, isError: false, error: null };
   it('maps the query to what the page shows', () => {
-    expect(policyLoadState({ ...base, isPending: true })).toBe('loading');
-    expect(policyLoadState({ ...base, isError: true, error: new ApiError(404) })).toBe('setup_required');
-    expect(policyLoadState({ ...base, isError: true, error: new ApiError(500) })).toBe('failed');
-    expect(policyLoadState({ ...base, data: { rules: [] } })).toBe('setup_required');
-    expect(policyLoadState({ ...base, data: { rules: [{}] } })).toBe('loaded');
+    expect(policyLoadState({ ...base, isPending: true }, true)).toBe('loading');
+    expect(policyLoadState({ ...base, isError: true, error: new ApiError(404) }, true)).toBe('setup_required');
+    expect(policyLoadState({ ...base, isError: true, error: new ApiError(500) }, true)).toBe('failed');
+    expect(policyLoadState({ ...base, data: { rules: [] } }, true)).toBe('setup_required');
+    expect(policyLoadState({ ...base, data: { rules: [{}] } }, true)).toBe('loaded');
+  });
+
+  // Regression (merge with main, 13 Nov): useActivePolicy is disabled when /context has no active
+  // policy, so the query stays pending; that must read as "setup required", not loading forever.
+  it('treats no active policy in the context as setup required, even while the query is pending', () => {
+    expect(policyLoadState({ ...base, isPending: true }, false)).toBe('setup_required');
   });
 
   // Regression (PR #4, RE-65): the status text, not the region's mounting, carries every state.
@@ -97,7 +122,11 @@ describe('filter guards', () => {
 
 describe('filters in the URL', () => {
   it('reads valid params and falls back to "any" for anything else', () => {
-    expect(filterFromParams(new URLSearchParams('severity=critical&mandatory=mandatory&q=pay'))).toEqual({ severity: 'critical', mandatory: 'mandatory', search: 'pay' });
+    expect(filterFromParams(new URLSearchParams('severity=critical&mandatory=mandatory&q=pay'))).toEqual({
+      severity: 'critical',
+      mandatory: 'mandatory',
+      search: 'pay',
+    });
     expect(filterFromParams(new URLSearchParams('severity=constructor&mandatory=yes'))).toEqual(NO_FILTER);
     expect(filterFromParams(new URLSearchParams(''))).toEqual(NO_FILTER);
   });

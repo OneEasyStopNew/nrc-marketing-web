@@ -1,9 +1,18 @@
-import { isNoActivePolicy, type ActivePolicyRule, type PolicyInput } from '@/api/policies';
+import { isNoActivePolicy, type ActiveRule } from '@/api/policy';
+import type { ValidationInputKind } from '@/api/schemas.gen';
 
-/** What the viewer shows. No policy (404 or a bundle with no rules) is a setup gap, never a clean result. */
+/**
+ * What the viewer shows. No policy is a setup gap, never a clean result: GET /context reports
+ * none (useActivePolicy is then disabled and would stay pending), the endpoint answers 404, or
+ * the bundle has no rules.
+ */
 export type PolicyLoadState = 'loading' | 'setup_required' | 'failed' | 'loaded';
 
-export function policyLoadState(q: { isPending: boolean; isError: boolean; error: unknown; data?: { rules: readonly unknown[] } }): PolicyLoadState {
+export function policyLoadState(
+  q: { isPending: boolean; isError: boolean; error: unknown; data?: { rules: readonly unknown[] } },
+  contextHasPolicy: boolean,
+): PolicyLoadState {
+  if (!contextHasPolicy) return 'setup_required';
   if (q.isPending) return 'loading';
   if (q.isError) return isNoActivePolicy(q.error) ? 'setup_required' : 'failed';
   return q.data && q.data.rules.length > 0 ? 'loaded' : 'setup_required';
@@ -39,25 +48,28 @@ export const NO_FILTER: PolicyFilter = { severity: 'any', mandatory: 'any', sear
 export const isSeverityFilter = (v: unknown): v is SeverityFilter => SEVERITY_FILTERS.some((s) => s === v);
 export const isMandatoryFilter = (v: unknown): v is MandatoryFilter => MANDATORY_FILTERS.some((m) => m === v);
 
-export const INPUT_LABEL: Record<PolicyInput, string> = { brief: 'Brief', text: 'Caption and text', image: 'Image' };
+export const INPUT_LABEL: Record<ValidationInputKind, string> = { brief: 'Brief', text: 'Caption and text', image: 'Image' };
 
 /**
  * Label for a value from the server, or the value as sent when the table has no own entry.
- * A plain `table[key]` would return inherited members for keys like `constructor`;
- * `Object.hasOwn` is not available (tsconfig lib is ES2021).
+ * A plain `table[key]` would return inherited members for keys like `constructor`.
  */
 export function labelFor(table: Readonly<Record<string, string>>, key: string): string {
-  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] ?? key : key;
+  return Object.hasOwn(table, key) ? (table[key] ?? key) : key;
 }
 
 /** Case-insensitive search over the rule's ID, wording and source; filters never change the wording itself. */
-export function filterRules(rules: readonly ActivePolicyRule[], f: PolicyFilter): ActivePolicyRule[] {
+export function filterRules(rules: readonly ActiveRule[], f: PolicyFilter): ActiveRule[] {
   const q = f.search.trim().toLowerCase();
-  return rules.filter((r) =>
-    (f.severity === 'any' || r.severity === f.severity)
-    && (f.mandatory === 'any' || r.mandatory === (f.mandatory === 'mandatory'))
-    && (!q || [r.rule_id, r.title, r.requirement, r.source.source_id, r.source.clause, r.source.excerpt ?? '']
-      .some((s) => s.toLowerCase().includes(q))));
+  return rules.filter(
+    (r) =>
+      (f.severity === 'any' || r.severity === f.severity) &&
+      (f.mandatory === 'any' || r.mandatory === (f.mandatory === 'mandatory')) &&
+      (!q ||
+        [r.rule_id, r.title, r.requirement, r.source.source_id, r.source.clause, r.source.excerpt ?? ''].some((s) =>
+          s.toLowerCase().includes(q),
+        )),
+  );
 }
 
 export const isFiltered = (f: PolicyFilter): boolean => f.severity !== 'any' || f.mandatory !== 'any' || f.search.trim() !== '';

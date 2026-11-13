@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { creativesApi, fieldErrorsOf, newIdempotencyKey, textOf, type BriefText, type DraftSetup, type FieldErrors, type Versioned } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
 
@@ -23,9 +23,31 @@ export type SaveState =
 export const AUTOSAVE_MS = 1500;
 const RETRY_MS = 3000;
 
-export const sameText = (a: BriefText, b: BriefText) => a.prompt === b.prompt && a.caption.trim() === b.caption.trim();
+export const sameText = (a: BriefText, b: BriefText): boolean => a.prompt === b.prompt && a.caption.trim() === b.caption.trim();
 
-export function useDraftEditor(opts: { initial: Versioned | null; readOnly?: boolean }) {
+/** What the composer gets from useDraftEditor. */
+export interface DraftEditor {
+  /** The server's current draft, or null before the first create. */
+  base: Versioned | null;
+  /** The text on screen, saved or not. */
+  text: BriefText;
+  errors: FieldErrors;
+  setErrors: (errors: FieldErrors) => void;
+  state: SaveState;
+  /** True when the text on screen differs from the server's current version. */
+  dirty: boolean;
+  setField: <K extends keyof BriefText>(key: K, value: BriefText[K]) => void;
+  /** Saves now (autosave calls this too). */
+  save: () => Promise<void>;
+  /** Creates the draft from an explicit action; null when it did not happen. */
+  create: (studyId: string, setup: DraftSetup) => Promise<Versioned | null>;
+  /** Conflict: drop my edits and keep the other person's version. */
+  takeServerVersion: () => void;
+  /** Conflict: save my text as a new version on top of theirs. */
+  saveMineOnTop: () => void;
+}
+
+export function useDraftEditor(opts: { initial: Versioned | null; readOnly?: boolean }): DraftEditor {
   const [base, setBase] = useState<Versioned | null>(opts.initial);
   const [text, setText] = useState<BriefText>(opts.initial ? textOf(opts.initial.creative) : { prompt: '', caption: '' });
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -35,9 +57,8 @@ export function useDraftEditor(opts: { initial: Versioned | null; readOnly?: boo
 
   // Refs so timers and in-flight requests always see the latest values.
   const textRef = useRef(text);
-  textRef.current = text;
   const baseRef = useRef(base);
-  baseRef.current = base;
+  useLayoutEffect(() => { textRef.current = text; baseRef.current = base; }, [text, base]);
   const inFlight = useRef(false);
   const retried = useRef(false);
   /** The create attempt in progress: its payload and key, so a retry of the same payload reuses the key. */

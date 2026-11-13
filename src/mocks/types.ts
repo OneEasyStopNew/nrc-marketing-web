@@ -1,8 +1,8 @@
 import type { Capability, Language, PostFormat, StudySnapshot, TenantMembership } from '@/api/session';
-import type { components } from '@/api/schema';
+import type { CreativeVersion } from '@/api/creatives';
+import type { Schemas } from '@/api/schemas.gen';
 import type { Creative } from '@/api/creatives';
 import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount } from '@/api/workspace';
-import type { ActivePolicy } from '@/api/policies';
 
 /**
  * Shape of the local dummy data file `src/mocks/data.ts`.
@@ -13,7 +13,7 @@ import type { ActivePolicy } from '@/api/policies';
  */
 
 export interface Grant {
-  roles: components['schemas']['Role'][];
+  roles: Schemas['Role'][];
   capabilities: Capability[];
 }
 
@@ -36,7 +36,7 @@ export interface DummyUser {
 export interface MockCreative extends Creative {
   tenant_id: string;
   /** Earlier versions, oldest first (served by GET /creatives/{id}/versions). */
-  history?: components['schemas']['CreativeVersionRead'][];
+  history?: CreativeVersion[];
 }
 
 /**
@@ -48,20 +48,20 @@ export interface MockCreative extends Creative {
 export interface MockRule {
   rule_id: string;
   rule_version: number;
-  gate: components['schemas']['Gate'];
+  gate: Schemas['Gate'];
   mandatory: boolean;
-  severity: components['schemas']['Severity'];
+  severity: Schemas['Severity'];
   check: { kind: 'phrases'; phrases: string[] } | { kind: 'min_words'; min_words: number };
   explanation: string;
   /** Why the rule could not be assessed (min_words only). */
   unassessed_reason?: string;
   suggested_correction?: string;
   needs_human_decision?: boolean;
-  source: components['schemas']['SourceReference'];
+  source: Schemas['SourceReference'];
 }
 
 /** A stored image. The fake API serves a labelled placeholder picture as its download link. */
-export interface MockAsset extends Omit<components['schemas']['AssetRead'], 'download_url' | 'download_url_expires_at'> {
+export interface MockAsset extends Omit<Schemas['AssetRead'], 'download_url' | 'download_url_expires_at'> {
   tenant_id: string;
 }
 
@@ -72,7 +72,19 @@ export interface MockValidationRun {
   /** Epoch ms the run started; the fake API moves it from QUEUED to RUNNING to done over a few seconds. */
   started_ms: number;
   /** The run as it reads once finished. */
-  final: components['schemas']['ValidationRunRead'];
+  final: Schemas['ValidationRunRead'];
+}
+
+/** A pretend generation job. The fake API walks it from queued to done over a few seconds. */
+export interface MockJob {
+  job_id: string;
+  tenant_id: string;
+  creative_id: string;
+  creative_version: number;
+  /** Epoch ms the job started. */
+  started_ms: number;
+  /** The placeholder picture it ends with. */
+  asset: MockAsset;
 }
 
 /** What data.ts must export. Later tickets add their collections here. */
@@ -98,14 +110,13 @@ export interface MockData {
    */
   WORKSPACE: Record<string, MockWorkspace>;
   /** Policy bundle version the fake validator reports. */
-  POLICY_BUNDLE_VERSION: string;
+  POLICY_BUNDLE_VERSION: number;
   /**
-   * Active policy per tenant id, served by GET /policies/active (NRC-20).
-   * Optional so older data.ts files still compile. Missing tenant (or the
-   * whole field) = no active policy, answered as 404 NOT_FOUND. Rules here
-   * are visibly synthetic, never real IPB wording.
+   * Tenant ids with no active policy (NRC-20 "Policy setup required"). For these,
+   * GET /context reports active_policy: null and GET /policies/active answers
+   * 404 NOT_FOUND. Optional so data.ts files without it still compile.
    */
-  ACTIVE_POLICIES?: Record<string, ActivePolicy>;
+  NO_ACTIVE_POLICY_TENANTS?: readonly string[];
 }
 
 /**

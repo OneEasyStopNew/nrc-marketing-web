@@ -14,11 +14,7 @@ export function sessionStorageOrNull(): Storage | null {
   }
 }
 
-export function installChunkReload(
-  target: EventTarget,
-  storage: ReloadStorage | null,
-  reload: () => void,
-): void {
+export function installChunkReload(target: EventTarget, storage: ReloadStorage | null, reload: () => void): void {
   // In-memory guard for when storage is missing or throws, so we still reload only once.
   let reloaded = false;
 

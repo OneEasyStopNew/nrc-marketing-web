@@ -1,15 +1,15 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, type ReactElement } from 'react';
 import { ChannelLabel } from '@/components/ui/PlatformLogo';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Link as AxLink } from '@astryxdesign/core/Link';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Text } from '@astryxdesign/core/Text';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
-import { assetsApi, manifestForDownload, shortHash, useAsset } from '@/api/assets';
-import { creativesApi, currentValidation, latestValidation } from '@/api/creatives';
+import { assetsApi, isPlaceholderImage, manifestForDownload, shortHash, useAsset, useDraftExport } from '@/api/assets';
+import { creativesApi, latestValidation } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
 import { isInProgress, passedAssessedChecks } from '@/api/validations';
 import { Badge } from '@/components/ui/Badge';
@@ -18,6 +18,7 @@ import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, SkeletonRows, TwoColumn } from '@/components/ui/Misc';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
+import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
 import { formatLabel, languageLabel, PostPreview } from './parts';
 
@@ -26,10 +27,9 @@ import { formatLabel, languageLabel, PostPreview } from './parts';
  * be posted, with what it was checked against, and the review-draft export.
  * It stays a "Draft for review": reviewer approval is a later, separate step.
  */
-export default function FinalPreview() {
+export default function FinalPreview(): ReactElement {
   const { creativeId = '' } = useParams();
   const { context } = useSession();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const q = useQuery({
     queryKey: ['creative-preview', context.tenant.tenant_id, creativeId],
@@ -37,9 +37,15 @@ export default function FinalPreview() {
     staleTime: 0,
   });
   const creative = q.data?.creative;
-  const asset = useAsset(creative?.asset_id);
-  const latest = creative ? latestValidation(creative) : undefined;
-  const run = useValidationRun(latest?.validation_run_id ?? '');
+  // The image and the latest check of this exact version: from the draft when the API
+  // names them there, else from the review package, else from a run started in this tab.
+  const pkg = useDraftExport(creative && !creative.asset_id ? creative.id : undefined, creative?.version);
+  const assetId = creative?.asset_id ?? pkg.data?.image.asset_id ?? null;
+  const asset = useAsset(assetId);
+  const listed = creative ? latestValidation(creative) ?? pkg.data?.latest_validation ?? undefined : undefined;
+  const known = creative && !listed ? knownRuns(context.tenant.tenant_id, creative.id)[0] : undefined;
+  const run = useValidationRun(listed?.validation_run_id ?? known?.id);
+  const latest = listed ?? run.data;
   const [exporting, setExporting] = useState(false);
 
   const draftLink = `/marketing/create/${encodeURIComponent(creativeId)}`;
@@ -63,7 +69,7 @@ export default function FinalPreview() {
 
   const study = context.studies.find((s) => s.study_id === creative.study_id);
   const format = context.post_formats.find((f) => f.channel === creative.channel && f.post_format === creative.post_format);
-  const current = currentValidation(creative);
+  const current = latest && latest.is_current && latest.creative_version === creative.version ? latest : undefined;
   const fullRun = latest && run.data?.validation_run_id === latest.validation_run_id ? run.data : undefined;
   const passed = !!current && !!fullRun && fullRun.is_current && passedAssessedChecks(fullRun);
   const studyChanged = !!study && study.version !== creative.study_snapshot_version;
@@ -84,7 +90,7 @@ export default function FinalPreview() {
     } catch (e) {
       if (!isApiError(e)) throw e;
       if (e.kind === 'not_implemented') toast('Export is not available yet', 'waiting', 'The export service is not connected in this build.');
-      else if (e.kind === 'invalid') toast('Nothing to export yet', 'waiting', 'The draft needs an image first.');
+      else if (e.code === 'EXPORT_NOT_READY' || e.kind === 'invalid') toast('Nothing to export yet', 'waiting', 'The draft needs an image first.');
       else toast('The review draft could not be downloaded', 'blocked', e.retryable ? 'Try again in a moment.' : e.message);
     } finally {
       setExporting(false);
@@ -110,18 +116,18 @@ export default function FinalPreview() {
         actions={(
           <>
             <Button variant="secondary" href={draftLink}>Back to the draft</Button>
-            <Button variant="primary" icon="dl" loading={exporting} disabled={!creative.asset_id} onClick={() => void download()}>
+            <Button variant="primary" icon="dl" loading={exporting} disabled={!assetId} onClick={() => void download()}>
               Download review draft
             </Button>
           </>
         )} />
 
-      {!creative.asset_id && (
+      {!assetId && !pkg.isFetching && (
         <Alert tone="info" title="No image yet">The review draft can be downloaded once the image is generated.</Alert>
       )}
       {studyChanged && (
         <Alert tone="waiting" title="The study facts changed">
-          This draft was written against study snapshot version {creative.study_snapshot_version}; the current one is version {study!.version}. Check the brief and validate again.
+          This draft was written against study snapshot version {creative.study_snapshot_version}; the current one is version {study.version}. Check the brief and validate again.
         </Alert>
       )}
       {imageAfterEdit && (
@@ -132,11 +138,11 @@ export default function FinalPreview() {
 
       <TwoColumn>
         <section aria-label="Post preview"><VStack gap={4}>
-          {creative.asset_id && asset.isPending
+          {assetId && asset.isPending
             ? <Card><SkeletonRows rows={6} /></Card>
             : (
               <PostPreview tenantName={context.tenant.name} caption={creative.caption ?? ''} format={format} full
-                image={asset.data?.download_url ? { src: asset.data.download_url, alt: `Image for version ${creative.version} of this draft${asset.data.provider === 'simulation' ? ' (simulation placeholder)' : ''}` } : undefined} />
+                image={asset.data?.download_url ? { src: asset.data.download_url, alt: `Image for version ${creative.version} of this draft${isPlaceholderImage(asset.data) ? ' (placeholder picture)' : ''}` } : undefined} />
             )}
           {asset.isError && <Alert tone="waiting" title="The image could not be loaded">The rest of the preview is still exact.</Alert>}
         </VStack></section>
@@ -156,7 +162,7 @@ export default function FinalPreview() {
                     <AxLink href={`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(latest.validation_run_id)}`}>Evidence</AxLink>
                   )}
                 </Pair>
-                <Pair k="Policy bundle">{fullRun?.policy_bundle_version ? <Text type="code">{fullRun.policy_bundle_version}</Text> : <Text type="body" color="secondary">Not reported</Text>}</Pair>
+                <Pair k="Policy rules">{fullRun?.policy_bundle_version != null ? `version ${fullRun.policy_bundle_version}` : <Text type="body" color="secondary">Not reported</Text>}</Pair>
                 <Pair k="Image">
                   {!asset.data ? <Text type="body" color="secondary">None yet</Text> : (
                     <VStack gap={0.5}>
@@ -164,6 +170,7 @@ export default function FinalPreview() {
                         {asset.data.origin === 'generated' ? 'Generated' : 'Uploaded'}
                         {asset.data.provider && <> by {asset.data.provider}{asset.data.model && ` (${asset.data.model})`}</>}
                         {' · '}{asset.data.width_px}×{asset.data.height_px} · {fmtDateTime(asset.data.created_at)}
+                        {isPlaceholderImage(asset.data) && ' · placeholder picture, not a generated image'}
                       </Text>
                       <Text type="supporting" color="secondary">Reference {shortHash(asset.data.checksum_sha256)}</Text>
                     </VStack>
@@ -186,9 +193,9 @@ export default function FinalPreview() {
           <Card>
             <CardHead title="Approval" icon="check" />
             <CardBody>
-              <Text type="body" wordBreak="break-word">Reviewer approval is a separate step and is not part of this build.</Text>
+              <Text type="body" wordBreak="break-word">Reviewer approval is a separate step. This page does not approve anything.</Text>
               <Text type="body" color="secondary">Passing validation does not approve a post, and downloading the review draft does not publish it.</Text>
-              <div><Button size="sm" variant="ghost" onClick={() => navigate(draftLink)}>Change the draft</Button></div>
+              <div><Button size="sm" variant="ghost" href={draftLink}>Change the draft</Button></div>
             </CardBody>
           </Card>
         </VStack>

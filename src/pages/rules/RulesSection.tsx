@@ -1,4 +1,4 @@
-import { lazy, type JSX } from 'react';
+import { lazy, type ReactElement } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import NoPermission from '@/pages/NoPermission';
@@ -15,9 +15,10 @@ const RulesPage = lazy(() => import('./RulesPage'));
  * the proposed /rules endpoints, which the backend does not provide yet. It is
  * kept under /marketing/rules/manage for policy administrators only (linked
  * from the viewer and the administrator's home page when they hold
- * policy:manage); its editing controls show "not available yet" for the demo.
+ * policy:manage); its editing controls open the in-development dialog while
+ * IN_DEVELOPMENT.ruleEditing is on (config/inDevelopment.ts).
  */
-export default function RulesSection(): JSX.Element {
+export default function RulesSection(): ReactElement {
   const { can } = useAuth();
   return (
     <Routes>

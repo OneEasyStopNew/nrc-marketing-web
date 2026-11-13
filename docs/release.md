@@ -2,7 +2,7 @@
 
 Status on 10 November 2026: **simulation only.** Every journey below passes against the local fake API and dummy
 data. None of it is staging or live-provider evidence. Staging runs replace it once the backend is deployed (Prabhu)
-and Cognito is set up (Bhushan).
+and Cognito is set up (both with Prabhu).
 
 ## Build
 
@@ -37,7 +37,7 @@ Measured route load, layout shift and device/network timings are not recorded ye
 
 | Command | What it covers |
 |---|---|
-| `npm run typecheck` | Strict TypeScript, including the types generated from the backend spec (`src/api/schema.d.ts`) |
+| `npm run typecheck` | Strict TypeScript, including the zod schemas and types generated from the backend spec (`src/api/schemas.gen.ts`) |
 | `npm test` | Unit tests: HTTP/401 refresh, return paths, Unicode highlights, diff, poll backoff, export clean-up |
 | `npm run test:e2e` | Playwright at desktop, laptop and mobile widths: sign-in and session (NRC-16), drafts (NRC-17), validation (NRC-19), revisions (NRC-22), final preview (NRC-23), the demo journey and crash recovery (NRC-27), plus an axe WCAG 2.1 AA and layout audit of every screen, light and dark |
 
@@ -59,7 +59,7 @@ and closed study (409), version conflict (412), field errors (422), save failure
 
 | Needed | From | Blocks |
 |---|---|---|
-| Cognito pool, app client, domain, test users | Bhushan | Real sign-in (step 1) |
+| Cognito pool, app client, domain, test users | Prabhu | Real sign-in (step 1) |
 | Staging URL, S3/CloudFront, deployed backend | Prabhu, Dinesh | Every integrated run; deployment and rollback |
 | Validation endpoints (D2) | Dinesh | Steps 3–5 on real data |
 | Image generation (D3) and Firoz's generation component (NRC-21) | Dinesh, Firoz | Step 6 and the export |

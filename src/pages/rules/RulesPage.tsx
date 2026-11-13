@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
@@ -23,24 +23,8 @@ import { Drawer, Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
 import { useRules, useWorkspaceMutation } from '@/pages/shared/queries';
-import { GATE_LABEL, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
-
-// Temporary switch. Owner: Firoz (NRC-20). Demo decision (13 Nov): the backend has no rule-writing
-// endpoints yet, so edit controls stay visible but only explain that.
-// Remove when the backend /rules write endpoints (draft, edit, activate, retire; Dinesh) are merged.
-// Undo: delete RULE_EDITING_AVAILABLE and useRuleEditing (call the open functions directly), turn the
-// test.fixme 'a policy administrator drafts a rule…' in e2e/workspace.spec.ts back into test, and delete
-// the 'rule editing controls stay visible but only explain…' test and its layout audit case.
-const RULE_EDITING_AVAILABLE = false;
-
-/** Runs a rule-writing action when editing is available; otherwise says why nothing opens. No API call is made. */
-function useRuleEditing(): (open: () => void) => void {
-  const { toast } = useToast();
-  return (open: () => void) => {
-    if (RULE_EDITING_AVAILABLE) open();
-    else toast('Rule editing is not available yet', 'info', 'Editing, activating and retiring rules is being built in the backend. The rules shown are read-only for now.');
-  };
-}
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { GATE_LABEL, InDevelopmentDialog, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
 
 const GATES: RuleGate[] = ['completeness', 'study_facts', 'policy', 'media'];
 const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
@@ -52,7 +36,7 @@ const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
  * against, each traced to the clause it comes from. Policy administrators
  * draft and edit rules; a draft applies only once activated.
  */
-export default function RulesPage(): JSX.Element {
+export default function RulesPage(): ReactElement {
   const { can } = useAuth();
   const rules = useRules();
   const [status, setStatus] = useState<RuleStatus>('ACTIVE');
@@ -60,7 +44,7 @@ export default function RulesPage(): JSX.Element {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<PolicyRule | 'new' | null>(null);
-  const all = rules.data ?? [];
+  const all = useMemo(() => rules.data ?? [], [rules.data]);
   const count = (s: RuleStatus) => all.filter((r) => r.status === s).length;
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -69,12 +53,11 @@ export default function RulesPage(): JSX.Element {
   }, [all, status, gate, search]);
   const open = all.find((r) => r.rule_id === openId);
   const manage = can('policy:manage');
-  const whenEditable = useRuleEditing();
 
   return (
     <VStack gap={8}>
       <PageHeader title="Rules" description="The rules every brief, caption and image is checked against, and the clause each one comes from."
-        actions={manage ? <Button variant="primary" icon="plus" onClick={() => whenEditable(() => setEditing('new'))}>New rule</Button> : undefined} />
+        actions={manage ? <Button variant="primary" icon="plus" onClick={() => setEditing('new')}>New rule</Button> : undefined} />
       <VStack gap={4}>
         <Tabs<RuleStatus> value={status} onChange={setStatus} tabs={[
           { id: 'ACTIVE', label: 'Active', count: count('ACTIVE') },
@@ -95,8 +78,11 @@ export default function RulesPage(): JSX.Element {
             : <EmptyState icon="doc" title="No rules match" description={search || gate !== 'any' ? 'Try another search or check area.' : undefined} />}
         </QueryState>
       </VStack>
-      {open && <RuleDrawer rule={open} manage={manage} onClose={() => setOpenId(null)} onEdit={() => whenEditable(() => setEditing(open))} />}
-      {editing && <RuleDialog rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {open && <RuleDrawer rule={open} manage={manage} onClose={() => setOpenId(null)} onEdit={() => setEditing(open)} />}
+      {/* NRC-20: the demo is read-only; editing rules is in development (config/inDevelopment.ts). */}
+      {editing && (IN_DEVELOPMENT.ruleEditing
+        ? <InDevelopmentDialog feature={editing === 'new' ? 'New rule' : `Edit ${editing.rule_id}`} description="Adding and editing rules is being built and will be available soon." onClose={() => setEditing(null)} />
+        : <RuleDialog rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />)}
     </VStack>
   );
 }
@@ -122,7 +108,6 @@ function ruleColumns(onOpen: (r: PolicyRule) => void): TableColumn<PolicyRule>[]
 function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; manage: boolean; onClose: () => void; onEdit: () => void }) {
   const { toast } = useToast();
   const [confirm, setConfirm] = useState<RuleStatus | null>(null);
-  const whenEditable = useRuleEditing();
   const change = useWorkspaceMutation((id: string, version: number, s: RuleStatus) => workspaceApi.updateRule(id, version, { status: s }), ['rules']);
   const setStatus = async (s: RuleStatus) => {
     try {
@@ -139,8 +124,8 @@ function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; ma
       footer={manage ? (
         <>
           {r.status !== 'RETIRED' && <Button variant="secondary" icon="edit" onClick={onEdit}>Edit</Button>}
-          {r.status === 'DRAFT' && <Button variant="primary" onClick={() => whenEditable(() => setConfirm('ACTIVE'))}>Activate</Button>}
-          {r.status === 'ACTIVE' && <Button variant="danger-outline" onClick={() => whenEditable(() => setConfirm('RETIRED'))}>Retire</Button>}
+          {r.status === 'DRAFT' && <Button variant="primary" onClick={() => setConfirm('ACTIVE')}>Activate</Button>}
+          {r.status === 'ACTIVE' && <Button variant="danger-outline" onClick={() => setConfirm('RETIRED')}>Retire</Button>}
         </>
       ) : undefined}>
       <VStack gap={5}>
@@ -163,7 +148,11 @@ function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; ma
           <Blockquote>{r.source.excerpt}</Blockquote>
         </VStack>
       </VStack>
-      <AlertDialog isOpen={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}
+      {confirm && IN_DEVELOPMENT.ruleEditing && (
+        <InDevelopmentDialog feature={confirm === 'ACTIVE' ? `Activate ${r.rule_id}` : `Retire ${r.rule_id}`}
+          description="Activating and retiring rules is being built and will be available soon." onClose={() => setConfirm(null)} />
+      )}
+      <AlertDialog isOpen={!!confirm && !IN_DEVELOPMENT.ruleEditing} onOpenChange={(o) => !o && setConfirm(null)}
         title={confirm === 'ACTIVE' ? `Activate ${r.rule_id}?` : `Retire ${r.rule_id}?`}
         description={confirm === 'ACTIVE' ? 'New validation runs will check posts against it. Results already given are not changed.' : 'New validation runs stop using it. Its history stays.'}
         actionLabel={confirm === 'ACTIVE' ? 'Activate' : 'Retire'} actionVariant={confirm === 'ACTIVE' ? 'primary' : 'destructive'}

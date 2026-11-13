@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput';
 import { DateInput } from '@astryxdesign/core/DateInput';
@@ -9,23 +9,23 @@ import { FileInput } from '@astryxdesign/core/FileInput';
 import { Grid } from '@astryxdesign/core/Grid';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
-import { Selector } from '@astryxdesign/core/Selector';
 import { Switch } from '@astryxdesign/core/Switch';
 import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
 import { Text } from '@astryxdesign/core/Text';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { Token } from '@astryxdesign/core/Token';
 import { useAuth } from '@/auth/AuthProvider';
+import { useMediaLibrary, type MediaItem } from '@/api/assets';
 import { fieldMessagesOf, isApiError } from '@/api/errors';
-import { workspaceApi, type MediaAsset, type MediaStatus, type MediaUpload } from '@/api/workspace';
+import { workspaceApi, type MediaUpload } from '@/api/workspace';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import { Alert, EmptyState, PageHeader } from '@/components/ui/Misc';
+import { EmptyState, PageHeader } from '@/components/ui/Misc';
 import { Drawer, Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
-import { useMedia, useWorkspaceMutation } from '@/pages/shared/queries';
-import { MediaBadge, QueryState, fmtBytes, useIsSimulation } from '@/pages/shared/ui';
+import { useWorkspaceMutation } from '@/pages/shared/queries';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment, InDevelopmentDialog, QueryState, fmtBytes, useIsSimulation } from '@/pages/shared/ui';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
 import { Center } from '@astryxdesign/core/Center';
 import { ClickableCard } from '@astryxdesign/core/ClickableCard';
@@ -37,34 +37,38 @@ import { Timestamp } from '@astryxdesign/core/Timestamp';
 type Kind = 'all' | 'image' | 'video';
 type Layout = 'grid' | 'table';
 
+const ORIGIN: Record<MediaItem['origin'], string> = { generated: 'Generated', uploaded: 'Uploaded' };
+const author = (m: MediaItem): string => m.created_by_name ?? m.created_by;
+const draftHref = (m: MediaItem): string => `/marketing/create/${encodeURIComponent(m.creative_id)}`;
+const shortId = (id: string): string => id.slice(0, 8);
+/** A readable name: the API gives an image no file name, only the draft it was made for. */
+const nameOf = (m: MediaItem): string => `Draft ${shortId(m.creative_id)} · version ${m.creative_version}`;
+
 /**
- * Media library (NRC-18): images and videos Marketing may use, with where
- * each came from, its licence and consent. Blocked or expired files cannot be
- * used in a post; the reason is always shown.
+ * Media library (NRC-18): the finished generated images of this organisation,
+ * newest first (GET /media). Uploading, removing and video come later; they
+ * show the in-development screen (config/inDevelopment.ts).
  */
-export default function MediaPage() {
+export default function MediaPage(): ReactElement {
   const sim = useIsSimulation();
   const { can } = useAuth();
-  const media = useMedia();
+  const media = useMediaLibrary();
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<Kind>('all');
-  const [status, setStatus] = useState<MediaStatus | 'any'>('any');
   const [layout, setLayout] = useState<Layout>('grid');
   const [openId, setOpenId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  const all = useMemo(() => media.data?.pages.flatMap((p) => p.items) ?? [], [media.data]);
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (media.data ?? []).filter((m) =>
-      (kind === 'all' || m.kind === kind)
-      && (status === 'any' || m.status === status)
-      && (!q || `${m.name} ${m.tags.join(' ')} ${m.rights.source}`.toLowerCase().includes(q)));
-  }, [media.data, search, kind, status]);
-  const open = (media.data ?? []).find((m) => m.asset_id === openId);
+    return all.filter((m) => !q || `${nameOf(m)} ${author(m)} ${m.creative_id}`.toLowerCase().includes(q));
+  }, [all, search]);
+  const open = all.find((m) => m.asset_id === openId);
 
   return (
     <VStack gap={8}>
-      <PageHeader title="Media" description="Images and videos you may use, with their source, licence and consent."
+      <PageHeader title="Media" description="Images generated from your drafts, newest first."
         actions={can('creative:write') ? <Button variant="primary" icon="up" onClick={() => setUploading(true)}>Upload</Button> : undefined} />
 
       <VStack gap={4}>
@@ -74,11 +78,9 @@ export default function MediaPage() {
             <SegmentedControlItem value="image" label="Images" />
             <SegmentedControlItem value="video" label="Videos" />
           </SegmentedControl>
-          <Selector label="Status" isLabelHidden value={status} onChange={(v) => setStatus((v ?? 'any') as MediaStatus | 'any')}
-            options={[{ value: 'any', label: 'Any status' }, { value: 'AVAILABLE', label: 'Available' }, { value: 'PENDING_CHECK', label: 'Being checked' }, { value: 'BLOCKED', label: 'Blocked' }, { value: 'EXPIRED', label: 'Licence expired' }]} />
           <StackItem size="fill">{null}</StackItem>
           <VStack width={300} maxWidth="100%">
-            <TextInput label="Search media" isLabelHidden type="search" placeholder="Search by name, tag or source" value={search} onChange={setSearch} hasClear
+            <TextInput label="Search media" isLabelHidden type="search" placeholder="Search by draft or person" value={search} onChange={setSearch} hasClear
               startIcon={<Icon name="search" />} />
           </VStack>
           <SegmentedControl label="Layout" value={layout} onChange={(v) => setLayout(v as Layout)}>
@@ -86,92 +88,96 @@ export default function MediaPage() {
             <SegmentedControlItem value="table" label="Table" />
           </SegmentedControl>
         </HStack>
+        {kind === 'video' && IN_DEVELOPMENT.mediaVideo
+          ? <InDevelopment feature="Video" description="Videos in the media library are being built and will be available soon. Images are ready now." />
+          : (
         <QueryState query={media} what="the media library">
           {() => !rows.length
-            ? <EmptyState icon="img" title={search || kind !== 'all' || status !== 'any' ? 'No files match' : 'No media yet'} description={search ? 'Try another search or clear the filters.' : 'Upload images or generate them from a brief.'} />
+            ? <EmptyState icon="img" title={search ? 'No files match' : 'No media yet'} description={search ? 'Try another search.' : 'Images generated from a brief appear here.'} />
             : layout === 'grid'
               ? (
                 <Grid columns={{ minWidth: 220, repeat: 'fill' }} gap={4}>
                   {rows.map((m) => <MediaTile key={m.asset_id} m={m} onOpen={() => setOpenId(m.asset_id)} />)}
                 </Grid>
               )
-              : <Table<MediaAsset> data={rows} columns={mediaColumns((m) => setOpenId(m.asset_id))} idKey="asset_id" density="balanced" dividers="rows" hasHover />}
+              : <Table<MediaItem> data={rows} columns={mediaColumns((m) => setOpenId(m.asset_id))} idKey="asset_id" density="balanced" dividers="rows" hasHover />}
         </QueryState>
-        <Text type="supporting" color="secondary">{rows.length} of {media.data?.length ?? 0} files{sim ? ' · Simulation: pictures are placeholders.' : ''}</Text>
+          )}
+        {!(kind === 'video' && IN_DEVELOPMENT.mediaVideo) && media.isSuccess && (
+          <HStack gap={3} vAlign="center" wrap="wrap">
+            <Text type="supporting" color="secondary">{rows.length} of {all.length} files{media.hasNextPage ? ' loaded' : ''}{sim ? ' · Simulation: pictures are placeholders.' : ''}</Text>
+            {media.hasNextPage && (
+              <Button size="sm" variant="secondary" loading={media.isFetchingNextPage} onClick={() => void media.fetchNextPage()}>Show older images</Button>
+            )}
+          </HStack>
+        )}
       </VStack>
 
       {open && <MediaDrawer m={open} onClose={() => setOpenId(null)} />}
-      {uploading && <UploadDialog onClose={() => setUploading(false)} />}
+      {uploading && (IN_DEVELOPMENT.mediaUpload
+        ? <InDevelopmentDialog feature="Upload media" description="Uploading images and videos is being built and will be available soon. Images generated from a brief are ready now." onClose={() => setUploading(false)} />
+        : <UploadDialog onClose={() => setUploading(false)} />)}
     </VStack>
   );
 }
 
-/** One file in the grid: the Astryx card-grid tile (picture, then name and status). */
-function MediaTile({ m, onOpen }: { m: MediaAsset; onOpen: () => void }) {
+/** One file in the grid: the Astryx card-grid tile (picture, then name, person and date). */
+function MediaTile({ m, onOpen }: { m: MediaItem; onOpen: () => void }) {
   return (
-    <ClickableCard label={`${m.name}, ${m.status.toLowerCase().replace('_', ' ')}. Open details`} onClick={onOpen} padding={0}>
+    <ClickableCard label={`${nameOf(m)}. Open details`} onClick={onOpen} padding={0}>
       <AspectRatio ratio={4 / 3} fit="cover">
-        {m.preview_url
-          ? <img src={m.preview_url} alt="" />
-          : <Center axis="both" height="100%"><Icon name={m.kind === 'video' ? 'video' : 'img'} size={24} color="secondary" /></Center>}
+        {m.download_url
+          ? <img src={m.download_url} alt="" />
+          : <Center axis="both" height="100%"><Icon name="img" size={24} color="secondary" /></Center>}
       </AspectRatio>
       <Section variant="transparent" padding={4}>
-        <VStack gap={2}>
-          <Text type="body" weight="semibold" maxLines={1}>{m.name}</Text>
-          <HStack gap={2} hAlign="between" vAlign="center">
-            <MediaBadge value={m.status} />
-            <Text type="supporting" color="secondary">
-              {m.kind === 'video' && m.duration_s != null ? `${m.duration_s}s · ` : ''}<Timestamp value={m.created_at} format="relative" type="supporting" color="secondary" />
-            </Text>
-          </HStack>
+        <VStack gap={1}>
+          <Text type="body" weight="semibold" maxLines={1}>{nameOf(m)}</Text>
+          <Text type="supporting" color="secondary" maxLines={1}>
+            {author(m)} · <Timestamp value={m.created_at} format="relative" type="supporting" color="secondary" />
+          </Text>
         </VStack>
       </Section>
     </ClickableCard>
   );
 }
 
-function mediaColumns(onOpen: (m: MediaAsset) => void): TableColumn<MediaAsset>[] {
+function mediaColumns(onOpen: (m: MediaItem) => void): TableColumn<MediaItem>[] {
   return [
-    { key: 'name', header: 'File', width: proportional(3, { minWidth: 220 }), renderCell: (m) => <Link onClick={() => onOpen(m)}>{m.name}</Link> },
-    { key: 'kind', header: 'Type', width: pixel(110), renderCell: (m) => (m.kind === 'video' ? 'Video' : 'Image') },
-    { key: 'origin', header: 'Origin', width: pixel(120), renderCell: (m) => ({ generated: 'Generated', uploaded: 'Uploaded', stock: 'Stock' })[m.origin] },
-    { key: 'size_bytes', header: 'Size', width: pixel(100), renderCell: (m) => fmtBytes(m.size_bytes) },
-    { key: 'status', header: 'Status', width: pixel(160), renderCell: (m) => <MediaBadge value={m.status} /> },
-    { key: 'used_in', header: 'Used in', width: pixel(100), renderCell: (m) => `${m.used_in} draft${m.used_in === 1 ? '' : 's'}` },
+    { key: 'asset_id', header: 'File', width: proportional(3, { minWidth: 220 }), renderCell: (m) => <Link onClick={() => onOpen(m)}>{nameOf(m)}</Link> },
+    { key: 'origin', header: 'Origin', width: pixel(120), renderCell: (m) => ORIGIN[m.origin] },
+    { key: 'width_px', header: 'Size', width: pixel(160), renderCell: (m) => `${m.width_px}×${m.height_px} · ${fmtBytes(m.size_bytes)}` },
+    { key: 'created_by', header: 'Made by', width: pixel(180), renderCell: (m) => author(m) },
+    { key: 'created_at', header: 'Made', width: pixel(160), renderCell: (m) => <Timestamp value={m.created_at} format="relative" /> },
   ];
 }
 
-function MediaDrawer({ m, onClose }: { m: MediaAsset; onClose: () => void }) {
+function MediaDrawer({ m, onClose }: { m: MediaItem; onClose: () => void }) {
   const { can } = useAuth();
   const { toast } = useToast();
   const [confirm, setConfirm] = useState(false);
-  const archive = useWorkspaceMutation((id: string) => workspaceApi.archiveMedia(id), ['media']);
+  const archive = useWorkspaceMutation((id: string) => workspaceApi.archiveMedia(id), ['media-library']);
   return (
-    <Drawer open onClose={onClose} title={m.name} subtitle={`${m.kind === 'video' ? 'Video' : 'Image'} · ${m.width_px}×${m.height_px} · ${fmtBytes(m.size_bytes)}`} badge={<MediaBadge value={m.status} />}
+    <Drawer open onClose={onClose} title={nameOf(m)} subtitle={`Image · ${m.width_px}×${m.height_px} · ${fmtBytes(m.size_bytes)}`}
       footer={can('creative:write') ? <Button variant="danger-outline" onClick={() => setConfirm(true)}>Remove from library</Button> : undefined}>
       <VStack gap={5}>
-        {m.status_reason && <Alert tone={m.status === 'BLOCKED' ? 'blocked' : m.status === 'EXPIRED' ? 'waiting' : 'info'} title={m.status_reason} />}
-        {m.preview_url
-          ? <AspectRatio ratio={m.width_px / m.height_px} fit="contain"><img src={m.preview_url} alt={`Preview of ${m.name}`} /></AspectRatio>
-          : <EmptyState icon="video" title="Preview not available" />}
-        <MetadataList title="Rights">
-          <MetadataListItem label="Source">{m.rights.source}</MetadataListItem>
-          <MetadataListItem label="Licence">{m.rights.licence}</MetadataListItem>
-          <MetadataListItem label="Licence ends">{m.rights.expires_at ? fmtDateTime(m.rights.expires_at) : 'Does not expire'}</MetadataListItem>
-          <MetadataListItem label="People shown">{m.rights.people_shown ? 'Yes' : 'No'}</MetadataListItem>
-          <MetadataListItem label="Signed release">{m.rights.people_shown ? (m.rights.consent_on_file ? 'On file' : 'Missing') : 'Not needed'}</MetadataListItem>
-        </MetadataList>
+        {m.download_url
+          ? <AspectRatio ratio={m.width_px / m.height_px} fit="contain"><img src={m.download_url} alt={`Generated for ${nameOf(m)}`} /></AspectRatio>
+          : <EmptyState icon="img" title="Preview not available" description="The link to this image could not be made. Open the draft to see it." />}
         <MetadataList title="File">
-          <MetadataListItem label="Origin">{({ generated: 'Generated', uploaded: 'Uploaded', stock: 'Stock library' })[m.origin]}</MetadataListItem>
-          <MetadataListItem label="Added">{m.created_by} · {fmtDateTime(m.created_at)}</MetadataListItem>
-          <MetadataListItem label="Used in">{m.used_in} draft{m.used_in === 1 ? '' : 's'}</MetadataListItem>
-          <MetadataListItem label="Tags">
-            {m.tags.length ? <HStack gap={1} wrap="wrap">{m.tags.map((t) => <Token key={t} label={t} size="sm" />)}</HStack> : '—'}
+          <MetadataListItem label="Origin">{ORIGIN[m.origin]}</MetadataListItem>
+          <MetadataListItem label="Type">{m.mime_type}</MetadataListItem>
+          <MetadataListItem label="Made">{author(m)} · {fmtDateTime(m.created_at)}</MetadataListItem>
+          <MetadataListItem label="From">
+            <Link href={draftHref(m)}>Draft {shortId(m.creative_id)}, version {m.creative_version}</Link>
           </MetadataListItem>
         </MetadataList>
       </VStack>
-      <AlertDialog isOpen={confirm} onOpenChange={setConfirm} title="Remove this file?"
-        description={m.used_in > 0 ? 'It is used in a draft, so it cannot be removed until it is taken out of that draft.' : 'It will no longer be available for new posts.'}
+      {confirm && IN_DEVELOPMENT.mediaUpload && (
+        <InDevelopmentDialog feature="Remove from library" description="Removing files from the library is being built and will be available soon." onClose={() => setConfirm(false)} />
+      )}
+      <AlertDialog isOpen={confirm && !IN_DEVELOPMENT.mediaUpload} onOpenChange={setConfirm} title="Remove this file?"
+        description="It will no longer be available for new posts."
         actionLabel="Remove" isActionLoading={archive.isPending}
         onAction={async () => {
           try { await archive.mutateAsync([m.asset_id]); setConfirm(false); onClose(); toast('File removed', 'done'); }
@@ -192,7 +198,7 @@ function UploadDialog({ onClose }: { onClose: () => void }) {
   const [consent, setConsent] = useState(false);
   const [tags, setTags] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const upload = useWorkspaceMutation((body: MediaUpload) => workspaceApi.uploadMedia(body), ['media']);
+  const upload = useWorkspaceMutation((body: MediaUpload) => workspaceApi.uploadMedia(body), ['media-library']);
 
   const submit = async () => {
     const e: Record<string, string> = {};
