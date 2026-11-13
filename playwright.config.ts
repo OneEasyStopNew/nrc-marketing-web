@@ -9,6 +9,8 @@ const PORT = 5181;
  */
 export default defineConfig({
   testDir: './e2e',
+  // A test.only left in by mistake fails the run in CI instead of silently skipping the rest (JS-84).
+  forbidOnly: !!process.env.CI,
   outputDir: './e2e-results/artifacts',
   fullyParallel: true,
   workers: 4,

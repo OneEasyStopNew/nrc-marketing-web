@@ -1,4 +1,7 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, ReactElement } from 'react';
+import { useNow } from '@/lib/useNow';
+import { countOf } from '@/lib/utils';
+
 import { PlatformLogo } from '@/components/ui/PlatformLogo';
 import { Card } from '@astryxdesign/core/Card';
 import { Grid } from '@astryxdesign/core/Grid';
@@ -13,12 +16,15 @@ import type { ActivityItem, ApprovalRequest, DraftSummary, Publication, SocialAc
 import { Button } from '@/components/ui/Button';
 import { EmptyState, PageHeader } from '@/components/ui/Misc';
 import { ROLE_LABELS } from '@/components/layout/AppLayout';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
 import {
   useAccounts, useActivity, useApprovals, useDrafts, useMembers, usePublications, useRules,
 } from './shared/queries';
 import {
-  AccountBadge, PublicationBadge, QueryState, ReviewBadge, SectionTitle, StatCard, ValidationBadge,
+  AccountBadge, InDevelopment, PublicationBadge, QueryState, ReviewBadge, SectionTitle, StatCard, ValidationBadge,
 } from './shared/ui';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Home: a dashboard per role the user holds in this organisation, composed
@@ -26,7 +32,7 @@ import {
  * tiles, then cards holding a table or a list. Counts come from the same
  * lists the sections show; nothing is invented.
  */
-export default function Home() {
+export default function Home(): ReactElement {
   const { can } = useAuth();
   const { me, context } = useSession();
   const roles = context.roles;
@@ -38,17 +44,26 @@ export default function Home() {
       <PageHeader title={`Welcome, ${first}`}
         description={`${roles.map((r) => ROLE_LABELS[r]).join(', ') || 'No role'} in ${context.tenant.name}.`} />
 
+      {/* The role dashboards and the activity feed are in no ticket yet (config/inDevelopment.ts). */}
+      {IN_DEVELOPMENT.dashboards && roles.length > 0 && (
+        <InDevelopment feature="Your dashboard" description="An overview of your work and recent activity is being built and will be available soon. Use the menu to open each section." />
+      )}
+
       {roles.length === 0 && (
         <EmptyState kind="locked" title="Nothing to open yet"
           description={`${me.display_name}, your role here does not include any Marketing section. Ask an administrator for the role you need.`} />
       )}
 
-      {roles.includes('admin') && can('membership:manage') && <AdminOverview />}
-      {has('creator') && can('creative:write') && <CreatorDashboard />}
-      {has('reviewer') && can('approval:decide') && <ReviewerDashboard />}
-      {has('policy_admin') && can('policy:manage') && <PolicyDashboard />}
-      {has('publisher') && can('publication:manage') && <PublisherDashboard />}
-      {can('creative:read') && <RecentActivity />}
+      {!IN_DEVELOPMENT.dashboards && (
+        <>
+          {roles.includes('admin') && can('membership:manage') && <AdminOverview />}
+          {has('creator') && can('creative:write') && <CreatorDashboard />}
+          {has('reviewer') && can('approval:decide') && <ReviewerDashboard />}
+          {has('policy_admin') && can('policy:manage') && <PolicyDashboard />}
+          {has('publisher') && can('publication:manage') && <PublisherDashboard />}
+          {can('creative:read') && <RecentActivity />}
+        </>
+      )}
     </VStack>
   );
 }
@@ -125,6 +140,7 @@ const draftColumns: TableColumn<DraftSummary>[] = [
 /* ---------- Reviewer ---------- */
 
 function ReviewerDashboard() {
+  const now = useNow();
   const approvals = useApprovals();
   return (
     <VStack gap={6}>
@@ -134,8 +150,8 @@ function ReviewerDashboard() {
         {(all) => {
           const pending = all.filter((a) => a.state === 'PENDING');
           const forMe = pending.filter((a) => !a.is_own);
-          const overdue = pending.filter((a) => a.due_at && Date.parse(a.due_at) < Date.now());
-          const decided = all.filter((a) => a.decided_at && Date.now() - Date.parse(a.decided_at) < 7 * 864e5);
+          const overdue = pending.filter((a) => a.due_at && Date.parse(a.due_at) < now);
+          const decided = all.filter((a) => a.decided_at && now - Date.parse(a.decided_at) < WEEK_MS);
           return (
             <>
               <Tiles>
@@ -199,7 +215,7 @@ function PolicyDashboard() {
                   <List hasDividers>
                     {failing.map((r) => (
                       <ListItem key={r.rule_id} label={r.title} description={r.rule_id}
-                        endContent={<Text type="supporting" color="secondary" hasTabularNumbers>{r.fail_count_30d} {r.fail_count_30d === 1 ? 'failure' : 'failures'}</Text>} />
+                        endContent={<Text type="supporting" color="secondary" hasTabularNumbers>{countOf(r.fail_count_30d, 'failure', 'failures')}</Text>} />
                     ))}
                   </List>
                 ) : <EmptyState icon="check" title="No failures in 30 days" />}
@@ -215,6 +231,7 @@ function PolicyDashboard() {
 /* ---------- Publisher ---------- */
 
 function PublisherDashboard() {
+  const now = useNow();
   const pubs = usePublications();
   const accounts = useAccounts();
   return (
@@ -231,7 +248,7 @@ function PublisherDashboard() {
               <Tiles>
                 <StatCard label="Scheduled" value={upcoming.length} />
                 <StatCard label="Need attention" value={attention.length} note="Failed, partial or not confirmed" />
-                <StatCard label="Published, last 7 days" value={all.filter((p) => p.state === 'PUBLISHED' && p.publish_at && Date.now() - Date.parse(p.publish_at) < 7 * 864e5).length} />
+                <StatCard label="Published, last 7 days" value={all.filter((p) => p.state === 'PUBLISHED' && p.publish_at && now - Date.parse(p.publish_at) < WEEK_MS).length} />
                 <StatCard label="Accounts to fix" value={accounts.isSuccess ? accountsNeedingWork.length : '—'} note="Expired or missing permission" />
               </Tiles>
               <Grid columns={{ minWidth: 340, repeat: 'fit' }} gap={3}>

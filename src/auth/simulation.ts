@@ -27,11 +27,12 @@ export function createSimulationProvider(): IdentityProvider {
   let userId: string | null = null;
   let profile: Profile = {};
 
-  const clear = async () => {
+  const clear = (): Promise<void> => {
     mockServer.revokeToken(access);
     access = null;
     userId = null;
     profile = {};
+    return Promise.resolve();
   };
 
   return {
@@ -57,7 +58,7 @@ export function createSimulationProvider(): IdentityProvider {
       if (/multi-factor/i.test(why)) throw new SignInError('mfa_required');
       if (params.get('error') === 'access_denied') throw new SignInError('cancelled');
       const pending = raw ? (JSON.parse(raw) as { state: string; returnTo: string; userId: string }) : null;
-      if (!pending || pending.state !== params.get('state')) throw new SignInError('expired_link');
+      if (pending?.state !== params.get('state')) throw new SignInError('expired_link');
       userId = pending.userId;
       const user = (await loadMockData())?.USERS.find((u) => u.id === userId);
       profile = { name: user?.display_name, email: user?.email };

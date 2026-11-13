@@ -1,4 +1,4 @@
-import { useId, type ChangeEvent, type ReactNode, type Ref } from 'react';
+import { useId, type ChangeEvent, type ReactNode, type Ref, type ReactElement } from 'react';
 import { VStack } from '@astryxdesign/core/Layout';
 import { Text } from '@astryxdesign/core/Text';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
@@ -34,7 +34,7 @@ export interface InputProps extends FieldProps {
   ref?: Ref<HTMLInputElement>;
 }
 
-export function Input({ label, help, error, required, info, value, onChange, type, placeholder, disabled, ref }: InputProps) {
+export function Input({ label, help, error, required, info, value, onChange, type, placeholder, disabled, ref }: InputProps): ReactElement {
   return (
     <>
       <AxTextInput ref={ref} label={label} value={value} type={type} placeholder={placeholder}
@@ -58,7 +58,7 @@ export interface TextareaProps extends FieldProps {
   ref?: Ref<HTMLTextAreaElement>;
 }
 
-export function Textarea({ label, help, error, required, info, value, onChange, rows, placeholder, disabled, limit, ref }: TextareaProps) {
+export function Textarea({ label, help, error, required, info, value, onChange, rows, placeholder, disabled, limit, ref }: TextareaProps): ReactElement {
   const countId = `${useId()}-count`;
   const len = charCount(value);
   const over = limit !== undefined && len > limit;
@@ -83,7 +83,7 @@ export function Textarea({ label, help, error, required, info, value, onChange, 
 }
 
 /** A labelled read-only value inside a form. */
-export function Field({ label, children }: { label: ReactNode; children: ReactNode; className?: string }) {
+export function Field({ label, children }: { label: ReactNode; children: ReactNode; className?: string }): ReactElement {
   return (
     <VStack gap={1}>
       <Text type="label">{label}</Text>

@@ -1,4 +1,4 @@
-import { useId, type SVGProps } from 'react';
+import { useId, type SVGProps, type ReactElement } from 'react';
 import { siFacebook, siInstagram } from 'simple-icons';
 import { Icon as AxIcon } from '@astryxdesign/core/Icon';
 import { HStack } from '@astryxdesign/core/Layout';
@@ -47,12 +47,12 @@ export function platformOf(text: string | null | undefined): Platform | null {
  * A platform's logo at an Astryx icon size. Pass `decorative` when the
  * platform's name is written right next to it, so it is not read twice.
  */
-export function PlatformLogo({ platform, size = 20, decorative }: { platform: Platform; size?: 16 | 20 | 24; decorative?: boolean }) {
+export function PlatformLogo({ platform, size = 20, decorative }: { platform: Platform; size?: 16 | 20 | 24; decorative?: boolean }): ReactElement {
   return <AxIcon icon={MARK[platform]} size={({ 16: 'sm', 20: 'md', 24: 'lg' } as const)[size]} label={decorative ? undefined : NAME[platform]} />;
 }
 
 /** "Facebook · Feed image (1:1)" with the Facebook logo in front; plain text when no platform is named. */
-export function ChannelLabel({ text, supporting }: { text: string; supporting?: boolean }) {
+export function ChannelLabel({ text, supporting }: { text: string; supporting?: boolean }): ReactElement {
   const platform = platformOf(text);
   const label = <Text type={supporting ? 'supporting' : 'body'} color={supporting ? 'secondary' : 'primary'} wordBreak="break-word">{text}</Text>;
   if (!platform) return label;

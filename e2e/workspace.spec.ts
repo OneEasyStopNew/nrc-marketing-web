@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { lightTheme, navOf, openNav, seen, settle, signInAt } from './helpers';
+import { IN_DEVELOPMENT } from '../src/config/inDevelopment';
 
 /**
  * Role dashboards and the workspace pages (approvals, publications, rules,
@@ -21,6 +22,7 @@ async function asReviewerInNrc(page: Page, path: string) {
 }
 
 test('each role gets its own dashboard and only its own sections', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.dashboards, 'the role dashboards are in development (config/inDevelopment.ts)');
   await signInAt(page, '/marketing', 'creator');
   await expect(h1(page)).toHaveText(/^Welcome, /);
   await expect(section(page, 'Your drafts')).toBeVisible();
@@ -48,6 +50,7 @@ test('each role gets its own dashboard and only its own sections', async ({ page
 });
 
 test('a reviewer approves a passed version, and a reason is required to send one back', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   await asReviewerInNrc(page, '/marketing/approvals');
   await expect(h1(page)).toHaveText('Approvals');
   await page.getByRole('link', { name: 'sim-cr-0005 · version 4' }).click();
@@ -66,6 +69,7 @@ test('a reviewer approves a passed version, and a reason is required to send one
 });
 
 test('nobody can approve their own submission', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   // sim-ap-0002 was submitted by the administrator.
   await signInAt(page, '/marketing/approvals/sim-ap-0002', 'admin');
   await expect(seen(page, 'You submitted this post. Someone else must review it.')).toBeVisible();
@@ -73,6 +77,7 @@ test('nobody can approve their own submission', async ({ page }) => {
 });
 
 test('approve is not offered when validation did not pass', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.approvals, 'approvals are in development (config/inDevelopment.ts)');
   await asReviewerInNrc(page, '/marketing/approvals/sim-ap-0005');
   // Already decided: shows the decision, no form.
   await expect(seen(page, 'Remove "guaranteed result" and add the required disclosure.')).toBeVisible();
@@ -80,6 +85,7 @@ test('approve is not offered when validation did not pass', async ({ page }) => 
 });
 
 test('a publisher queues an approved post; it is never shown as published', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.publications, 'publishing is in development (config/inDevelopment.ts)');
   await signInAt(page, '/marketing/publications', 'publisher');
   await expect(h1(page)).toHaveText('Publications');
   await page.getByRole('button', { name: 'Schedule a post' }).click();
@@ -102,6 +108,7 @@ test('a publisher queues an approved post; it is never shown as published', asyn
 });
 
 test('a policy administrator drafts a rule with its source, then activates it', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.ruleEditing, 'rule editing is in development (config/inDevelopment.ts)');
   await signInAt(page, '/marketing/rules', 'policy-admin');
   await page.getByRole('button', { name: 'New rule' }).click();
   const dialog = page.getByRole('dialog', { name: 'New rule' });
@@ -123,6 +130,7 @@ test('a policy administrator drafts a rule with its source, then activates it', 
 });
 
 test('an administrator invites someone and changes roles; a role is always required', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.team, 'team management is in development (config/inDevelopment.ts)');
   await signInAt(page, '/marketing/team', 'admin');
   await expect(h1(page)).toHaveText('Team');
   await page.getByRole('button', { name: 'Invite someone' }).click();
@@ -151,29 +159,8 @@ test('pages outside the role are refused, not hidden behind a blank screen', asy
   await expect(seen(page, 'Not available with your role')).toBeVisible();
 });
 
-// Demo decision (NRC-18, 11 Nov 2026): media upload and removal are not built in the backend yet. The controls stay
-// visible and say so (MEDIA_WRITES_AVAILABLE in MediaPage.tsx); no dialog opens and nothing is sent.
-test('media upload and removal say they are not available yet and open nothing', async ({ page }) => {
-  await signInAt(page, '/marketing/media', 'creator');
-  await page.getByRole('button', { name: 'Upload' }).click();
-  await expect(seen(page, 'Uploading is not available yet')).toBeVisible();
-  await expect(seen(page, 'Uploading images and videos is being built in the backend. Generated images appear here once they are made.')).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-
-  // The toast can sit over the grid; open the file from the keyboard.
-  await page.getByRole('button', { name: /^sim-waiting-room\.png/ }).press('Enter');
-  const drawer = page.getByRole('dialog');
-  await expect(drawer).toHaveCount(1);
-  await drawer.getByRole('button', { name: 'Remove from library' }).click();
-  await expect(seen(page, 'Removing media is not available yet')).toBeVisible();
-  await expect(page.getByRole('alertdialog')).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toHaveCount(1);
-  // The file is still in the library.
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: /^sim-waiting-room\.png/ })).toBeVisible();
-});
-
 test('media and connected accounts show their fixtures and what needs fixing', async ({ page }) => {
+  test.skip(IN_DEVELOPMENT.accounts || IN_DEVELOPMENT.mediaVideo, 'connected accounts and video are in development (config/inDevelopment.ts)');
   await signInAt(page, '/marketing/media', 'creator');
   await expect(h1(page)).toHaveText('Media');
   await expect(page.getByRole('button', { name: 'Upload' }).or(page.getByRole('button', { name: /Upload/ })).first()).toBeVisible();
@@ -183,4 +170,49 @@ test('media and connected accounts show their fixtures and what needs fixing', a
   await expect(seen(page, 'Access expired on 2 Nov 2026. Reconnect to publish again.')).toBeVisible();
   await page.getByRole('button', { name: 'Reconnect' }).first().click();
   await expect(seen(page, /reconnected$/)).toBeVisible();
+});
+
+test('features that are not planned yet show the in-development screen, not dummy data', async ({ page }) => {
+  const inDevelopment = (feature: string) => page.getByRole('heading', { name: `In development: ${feature}` });
+
+  // Home: the role dashboards.
+  await signInAt(page, '/marketing', 'admin');
+  if (IN_DEVELOPMENT.dashboards) await expect(inDevelopment('Your dashboard')).toBeVisible();
+
+  // Whole pages. Each is opened directly (simulation signs in again on every load).
+  for (const [path, title, feature, on] of [
+    ['/marketing/team', 'Team', 'Team management', IN_DEVELOPMENT.team],
+    ['/marketing/approvals', 'Approvals', 'Approvals', IN_DEVELOPMENT.approvals],
+    ['/marketing/publications', 'Publications', 'Publishing', IN_DEVELOPMENT.publications],
+    ['/marketing/integrations', 'Connected accounts', 'Connected accounts', IN_DEVELOPMENT.accounts],
+  ] as const) {
+    if (!on) continue;
+    await signInAt(page, path, 'admin');
+    await expect(h1(page)).toHaveText(title);
+    await expect(inDevelopment(feature)).toBeVisible();
+  }
+
+  // Media: the Videos filter and Upload.
+  await signInAt(page, '/marketing/media', 'admin');
+  await expect(h1(page)).toHaveText('Media');
+  if (IN_DEVELOPMENT.mediaVideo) {
+    await page.getByText('Videos', { exact: true }).click();
+    await expect(inDevelopment('Video')).toBeVisible();
+  }
+  if (IN_DEVELOPMENT.mediaUpload) {
+    await page.getByRole('button', { name: 'Upload' }).click();
+    await expect(page.getByRole('dialog').getByRole('heading', { name: 'In development: Upload media' })).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).last().click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+
+  // Rules: the list stays; New rule opens the in-development dialog, not the editor.
+  if (IN_DEVELOPMENT.ruleEditing) {
+    await signInAt(page, '/marketing/rules', 'admin');
+    await expect(h1(page)).toHaveText('Rules');
+    await expect(page.getByRole('table')).toBeVisible();
+    await page.getByRole('button', { name: 'New rule' }).click();
+    await expect(page.getByRole('dialog').getByRole('heading', { name: 'In development: New rule' })).toBeVisible();
+    await expect(page.getByRole('textbox')).toHaveCount(0);
+  }
 });

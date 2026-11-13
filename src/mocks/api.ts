@@ -2,7 +2,8 @@ import { API_PREFIX } from '@/config/env';
 import { TENANT_HEADER } from '@/api/http';
 import type { Capability, ContextWire, MeWire } from '@/api/session';
 import { CAPTION_MAX, PROMPT_MAX, type Creative } from '@/api/creatives';
-import type { DummyUser, MockAsset, MockCreative, MockData, MockValidationRun } from './types';
+import type { DummyUser, MockAsset, MockCreative, MockData, MockJob, MockValidationRun } from './types';
+import type { Schemas } from '@/api/schemas.gen';
 import type { ValidationRun as ValidationRunRead } from '@/api/validations';
 import { evaluate } from './validator';
 import { loadMockData, MOCK_DATA_PATH } from './load';
@@ -54,8 +55,27 @@ const ROUTES: Record<string, Handler> = {
       studies: data.STUDIES[tenant.tenant_id] ?? [],
       languages: data.LANGUAGES,
       post_formats: data.POST_FORMATS,
+      active_policy: {
+        policy_bundle_id: 'sim-policy-bundle', version: data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
+        is_synthetic: true, rule_count: data.VALIDATION_RULES.length,
+      },
     };
     return json(200, ctx);
+  },
+
+  /** The placeholder rules, in the shape of the real active policy. */
+  'GET /policies/active': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const bundle: Schemas['PolicyBundleRead'] = {
+      policy_bundle_id: 'sim-policy-bundle', version: req.data.POLICY_BUNDLE_VERSION, name: 'Placeholder rules (simulation)',
+      source_ref: 'simulation', is_synthetic: true, approved_by: 'simulation', approved_at: '2026-11-01T00:00:00Z',
+      rules: req.data.VALIDATION_RULES.map((r) => ({
+        rule_id: r.rule_id, rule_version: r.rule_version, title: r.explanation, requirement: r.explanation,
+        gate: r.gate, severity: r.severity, mandatory: r.mandatory, applies_to: ['brief', 'text'], source: r.source,
+      })),
+    };
+    return json(200, bundle);
   },
 
   /* ---------- Creatives (NRC-2) ---------- */
@@ -147,7 +167,8 @@ const ROUTES: Record<string, Handler> = {
     if (denied) return denied;
     const c = find(req);
     if (!c) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
-    const all = [versionOf(c), ...[...(c.history ?? [])].reverse()];
+    // The author's display name is looked up when read, like the API does.
+    const all = [versionOf(c), ...[...(c.history ?? [])].reverse()].map((v) => ({ ...v, created_by_name: displayName(req, v.created_by) }));
     const cursor = req.query.get('cursor');
     const limit = Math.max(1, Math.min(100, Number(req.query.get('limit') ?? 20)));
     const older = cursor ? all.filter((v) => v.version < Number(cursor)) : all;
@@ -173,9 +194,8 @@ const ROUTES: Record<string, Handler> = {
       return json(202, { job_id: prior.final.job_id, validation_run_id: prior.final.validation_run_id, state: 'QUEUED' });
     }
     const c = store(req).get(body.creative_id ?? '');
-    if (!c || c.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
-    if (body.input_kind === 'image') return problem(501, 'NOT_IMPLEMENTED', 'Image validation is not available yet.');
-    if (body.input_kind !== 'brief' && body.input_kind !== 'text') {
+    if (c?.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
+    if (body.input_kind !== 'brief' && body.input_kind !== 'text' && body.input_kind !== 'image') {
       return fieldsProblem([{ loc: ['body', 'input_kind'], msg: "Input should be 'brief', 'text' or 'image'", type: 'enum' }]);
     }
     if (body.creative_version !== c.version) {
@@ -185,7 +205,10 @@ const ROUTES: Record<string, Handler> = {
     if (study?.recruitment_status !== 'recruiting') return problem(409, 'STUDY_CLOSED', 'The study is closed.');
 
     const inputKind = body.input_kind;
-    const text = inputKind === 'brief' ? c.current_prompt : c.caption ?? '';
+    if (inputKind === 'image' && !findAsset(req, body.asset_id ?? '')) {
+      return fieldsProblem([{ loc: ['body', 'asset_id'], msg: 'Send the asset_id of an image of this draft.', type: 'value_error' }]);
+    }
+    const text = inputKind === 'brief' ? c.current_prompt : inputKind === 'text' ? c.caption ?? '' : '';
     const failure = mockServer.nextValidationFailure;
     mockServer.nextValidationFailure = null;
     const id = `sim-run-${crypto.randomUUID().slice(0, 8)}`;
@@ -199,13 +222,13 @@ const ROUTES: Record<string, Handler> = {
               : 'The text could not be read for checking (simulation). Nothing was assessed.',
           }],
         }
-      : evaluate(text, req.data.VALIDATION_RULES);
+      : inputKind === 'image' ? IMAGE_RESULT : evaluate(text, req.data.VALIDATION_RULES);
     const run: MockValidationRun = {
       tenant_id: c.tenant_id, creative_id: c.id, started_ms: Date.now(),
       final: {
         validation_run_id: id, job_id: `sim-job-${id.slice(8)}`, input_kind: inputKind,
         creative_version: c.version, state: failure ? 'FAILED' : 'SUCCEEDED', is_current: true,
-        evaluated_at: null, input_hash: `sim-${text.length}`, asset_id: null,
+        evaluated_at: null, input_hash: `sim-${text.length}`, asset_id: inputKind === 'image' ? body.asset_id ?? null : null,
         study_snapshot_version: c.study_snapshot_version, policy_bundle_version: req.data.POLICY_BUNDLE_VERSION,
         ...result,
       },
@@ -220,7 +243,7 @@ const ROUTES: Record<string, Handler> = {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
     const run = mockServer.runs(req.data.VALIDATION_RUNS).get(req.params.id);
-    const c = run && run.tenant_id === req.tenantId ? store(req).get(run.creative_id) : undefined;
+    const c = run?.tenant_id === req.tenantId ? store(req).get(run.creative_id) : undefined;
     if (!run || !c) return problem(404, 'NOT_FOUND', 'This validation run does not exist or is not available to you.');
     return json(200, readRun(run, c));
   },
@@ -237,7 +260,7 @@ const ROUTES: Record<string, Handler> = {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
     const next = mockServer.nextImageLinks.shift();
-    const a = req.data.ASSETS.find((x) => x.asset_id === req.params.id && x.tenant_id === req.tenantId);
+    const a = findAsset(req, req.params.id);
     // Another organisation's image is answered exactly like a missing one.
     if (!a || next === 'other-organisation') return problem(404, 'NOT_FOUND', 'This image does not exist or is not available to you.');
     if (next === 'unavailable') return problem(503, 'STORAGE_UNAVAILABLE', 'Image storage is temporarily unavailable. Try again.', true);
@@ -256,15 +279,72 @@ const ROUTES: Record<string, Handler> = {
     return json(200, { ok: true });
   },
 
+  /* ---------- Image generation (placeholder pictures only) ---------- */
+
+  'GET /creatives/:id/generation-eligibility': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const c = find(req);
+    return c ? json(200, eligibilityOf(req, c)) : problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
+  },
+
+  'POST /creative-jobs': (req) => {
+    const denied = needCap(req, 'generation:run');
+    if (denied) return denied;
+    const key = req.idempotencyKey;
+    if (!key || !/^[A-Za-z0-9_-]{8,128}$/.test(key)) {
+      return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key of 8 to 128 letters, digits, _ or -.', type: 'missing' }]);
+    }
+    const body = req.body as { creative_id?: string; creative_version?: number; kind?: string };
+    const payload = JSON.stringify(body);
+    const earlier = mockServer.idempotency.get(`${req.tenantId}:job:${key}`);
+    if (earlier) {
+      if (earlier.payload !== payload) return problem(409, 'IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request.');
+      return json(202, { job_id: earlier.id, state: 'QUEUED' }, { 'Idempotent-Replayed': 'true' });
+    }
+    const c = store(req).get(body.creative_id ?? '');
+    if (c?.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
+    const e = eligibilityOf(req, c, body.creative_version);
+    if (!e.eligible) return problem(409, 'GENERATION_NOT_ELIGIBLE', e.message, false, { reason: e.reason });
+    const format = req.data.POST_FORMATS.find((f) => f.channel === c.channel && f.post_format === c.post_format);
+    const id = `sim-job-${crypto.randomUUID().slice(0, 8)}`;
+    const job: MockJob = {
+      job_id: id, tenant_id: c.tenant_id, creative_id: c.id, creative_version: c.version, started_ms: Date.now(),
+      asset: {
+        tenant_id: c.tenant_id, asset_id: `sim-asset-${id.slice(8)}`, creative_id: c.id, origin: 'generated', mime_type: 'image/svg+xml',
+        width_px: format?.width_px ?? 1080, height_px: format?.height_px ?? 1080, size_bytes: 600,
+        checksum_sha256: id.slice(8).padEnd(64, '0'), provider: 'simulation', model: 'placeholder',
+        created_at: new Date(Date.now() + JOB_DONE_MS).toISOString(),
+      },
+    };
+    mockServer.jobs().set(id, job);
+    mockServer.saveJobs();
+    mockServer.idempotency.set(`${req.tenantId}:job:${key}`, { payload, id });
+    return json(202, { job_id: id, state: 'QUEUED' });
+  },
+
+  'GET /jobs/:id': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const job = mockServer.jobs().get(req.params.id);
+    if (job?.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This job does not exist or is not available to you.');
+    const read = readJob(job);
+    // The finished picture becomes the draft's image.
+    const c = store(req).get(job.creative_id);
+    if (read.state === 'SUCCEEDED' && c && c.asset_id !== job.asset.asset_id && c.version === job.creative_version) {
+      c.asset_id = job.asset.asset_id;
+      mockServer.saveCreatives();
+    }
+    return json(200, read);
+  },
+
   'GET /creatives/:id/export': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
     const c = find(req);
     if (!c) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
-    const a = c.asset_id ? req.data.ASSETS.find((x) => x.asset_id === c.asset_id && x.tenant_id === c.tenant_id) : undefined;
-    if (!a) {
-      return fieldsProblem([{ loc: ['path', 'creative_id'], msg: 'The draft has no image yet. Generate the image first.', type: 'value_error' }]);
-    }
+    const a = c.asset_id ? findAsset(req, c.asset_id) : undefined;
+    if (!a) return problem(409, 'EXPORT_NOT_READY', 'Generate an image for the current version before exporting.');
     const latest = runsFor(req, c)[0];
     const full = latest ? readRun(latest, c) : null;
     return json(200, {
@@ -286,7 +366,28 @@ const ROUTES: Record<string, Handler> = {
   'GET /media': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
-    return json(200, ws(req).media.map((m) => ({ ...m, preview_url: m.kind === 'image' ? placeholderImage(m.width_px, m.height_px, m.name.replace(/\.[a-z0-9]+$/i, '')) : null })));
+    // As the API: the finished generated images of this tenant's drafts, newest
+    // first, a page at a time (cursor = created_at of the last item seen).
+    const creatives = [...store(req).values()].filter((c) => c.tenant_id === req.tenantId);
+    const finished = [
+      ...req.data.ASSETS.filter((a) => a.tenant_id === req.tenantId).map((a) => ({ a, version: creatives.find((c) => c.asset_id === a.asset_id)?.version })),
+      ...[...mockServer.jobs().values()].filter((j) => j.tenant_id === req.tenantId && Date.now() - j.started_ms >= JOB_DONE_MS).map((j) => ({ a: j.asset, version: j.creative_version })),
+    ];
+    const items = finished.flatMap(({ a, version }) => {
+      const c = creatives.find((x) => x.id === a.creative_id);
+      if (!c || version == null) return [];
+      const { download_url, download_url_expires_at } = assetRead(a);
+      return [{
+        asset_id: a.asset_id, creative_id: a.creative_id, creative_version: version, origin: a.origin, mime_type: a.mime_type,
+        width_px: a.width_px, height_px: a.height_px, size_bytes: a.size_bytes, created_at: a.created_at,
+        created_by: c.created_by, created_by_name: displayName(req, c.created_by), download_url, download_url_expires_at,
+      }];
+    }).sort((x, y) => y.created_at.localeCompare(x.created_at));
+    const cursor = req.query.get('cursor');
+    const limit = Math.max(1, Math.min(50, Number(req.query.get('limit') ?? 20)));
+    const older = cursor ? items.filter((m) => m.created_at < cursor) : items;
+    const page = older.slice(0, limit);
+    return json(200, { items: page, next_cursor: older.length > limit ? page[page.length - 1].created_at : null });
   },
 
   'POST /media': (req) => {
@@ -475,7 +576,7 @@ const ROUTES: Record<string, Handler> = {
       state: (b.publish_at ? 'SCHEDULED' : 'QUEUED') as Publication['state'],
       state_reason: b.publish_at ? null : 'Queued in simulation. Nothing is sent to Facebook or Instagram.',
       created_by: req.user.user_id, created_at: new Date().toISOString(),
-      channels: accounts.map((a) => ({ account_id: a.account_id, channel: a.channel, account_name: a.name, state: (b.publish_at ? 'SCHEDULED' : 'QUEUED') as Publication['state'], permalink: null, error: null })),
+      channels: accounts.map((a) => ({ account_id: a.account_id, channel: a.channel, account_name: a.name, state: b.publish_at ? ('SCHEDULED' as const) : ('QUEUED' as const), permalink: null, error: null })),
     };
     ws(req).publications.unshift(pub);
     mockServer.idempotency.set(key, { payload: JSON.stringify(b), id: pub.publication_id });
@@ -508,7 +609,7 @@ const ROUTES: Record<string, Handler> = {
     const errs: FieldError[] = [];
     if (!b.name?.trim()) errs.push({ loc: ['body', 'name'], msg: 'Enter their name.', type: 'missing' });
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(b.email ?? '')) errs.push({ loc: ['body', 'email'], msg: 'Enter a work email address.', type: 'value_error' });
-    else if (!/\.test$/.test(b.email!)) errs.push({ loc: ['body', 'email'], msg: 'In simulation, use an example.test address.', type: 'value_error' });
+    else if (!b.email?.endsWith('.test')) errs.push({ loc: ['body', 'email'], msg: 'In simulation, use an example.test address.', type: 'value_error' });
     if (!b.roles?.length) errs.push({ loc: ['body', 'roles'], msg: 'Give them at least one role.', type: 'missing' });
     if (ws(req).members.some((m) => m.email === b.email)) errs.push({ loc: ['body', 'email'], msg: 'This person is already a member.', type: 'value_error' });
     if (errs.length) return fieldsProblem(errs);
@@ -548,12 +649,12 @@ const ROUTES: Record<string, Handler> = {
 
 /* ---------- Creatives helpers ---------- */
 
-type FieldError = { loc: (string | number)[]; msg: string; type: string };
+interface FieldError { loc: (string | number)[]; msg: string; type: string }
 
 const store = (req: MockRequest) => mockServer.creatives(req.data.CREATIVES);
 const find = (req: MockRequest) => {
   const c = store(req).get(req.params.id);
-  return c && c.tenant_id === req.tenantId ? c : undefined;
+  return c?.tenant_id === req.tenantId ? c : undefined;
 };
 const etagOf = (c: MockCreative) => `"${c.version}"`;
 const codePoints = (s: string) => [...s].length;
@@ -637,8 +738,11 @@ const summaryOf = (r: ValidationRunRead) => ({
 
 const versionOf = (c: MockCreative) => ({
   version: c.version, current_prompt: c.current_prompt, caption: c.caption, study_snapshot_id: c.study_snapshot_id,
-  language: c.language, channel: c.channel, post_format: c.post_format, created_by: c.created_by, created_at: c.updated_at,
+  language: c.language, channel: c.channel, post_format: c.post_format, created_by: c.created_by, created_by_name: null, created_at: c.updated_at,
 });
+
+/** The display name of a user in the simulation, or null when there is none (as the API answers). */
+const displayName = (req: MockRequest, userId: string): string | null => req.data.USERS.find((u) => u.user_id === userId)?.display_name ?? null;
 
 function needCap({ user, tenantId }: MockRequest, cap: Capability) {
   const grant = tenantId ? user.grants[tenantId] : undefined;
@@ -649,6 +753,62 @@ function needCap({ user, tenantId }: MockRequest, cap: Capability) {
 
 /** Stands in for a signed link that has expired: the browser cannot draw it. */
 const EXPIRED_IMAGE_LINK = 'data:image/png;base64,ZXhwaXJlZA==';
+
+/** Seeded images plus the placeholder pictures finished jobs made. */
+function findAsset(req: MockRequest, assetId: string): MockAsset | undefined {
+  const mine = (a: MockAsset) => a.asset_id === assetId && a.tenant_id === req.tenantId;
+  return req.data.ASSETS.find(mine)
+    ?? [...mockServer.jobs().values()].filter((j) => Date.now() - j.started_ms >= JOB_DONE_MS).map((j) => j.asset).find(mine);
+}
+
+const JOB_DONE_MS = 3200;
+
+function readJob(j: MockJob): Schemas['JobRead'] {
+  const t = Date.now() - j.started_ms;
+  const [state, stage] = t < 600 ? (['QUEUED', null] as const)
+    : t < 1500 ? (['RUNNING', 'submitting'] as const)
+      : t < JOB_DONE_MS ? (['WAITING_PROVIDER', 'generating'] as const)
+        : (['SUCCEEDED', 'stored'] as const);
+  const done = state === 'SUCCEEDED';
+  return {
+    job_id: j.job_id, kind: 'image_generation', creative_id: j.creative_id, creative_version: j.creative_version,
+    state, stage, provider_request_id: `sim-${j.job_id.slice(8)}`, failure_code: null, failure_message: null,
+    result_asset_id: done ? j.asset.asset_id : null,
+    created_at: new Date(j.started_ms).toISOString(),
+    updated_at: new Date(Math.min(Date.now(), j.started_ms + JOB_DONE_MS)).toISOString(),
+    completed_at: done ? new Date(j.started_ms + JOB_DONE_MS).toISOString() : null,
+  };
+}
+
+/** The same rule the real API applies: only a brief that passed for this exact version may be generated. */
+function eligibilityOf(req: MockRequest, c: MockCreative, version = c.version): Schemas['GenerationEligibility'] {
+  const base = { creative_id: c.id, creative_version: version, policy_bundle_version: req.data.POLICY_BUNDLE_VERSION, validation_run_id: null };
+  const no = (reason: Schemas['EligibilityReason'], message: string) => ({ ...base, eligible: false, reason, message });
+  if (version !== c.version) return no('STALE_VERSION', 'A newer version of the draft exists. Validate and generate that one.');
+  const study = (req.data.STUDIES[c.tenant_id] ?? []).find((st) => st.study_id === c.study_id);
+  if (study?.recruitment_status !== 'recruiting') return no('STUDY_CLOSED', 'The study is closed to recruitment.');
+  const run = runsFor(req, c).find((r) => r.final.input_kind === 'brief' && r.final.creative_version === c.version);
+  const now = run ? readRun(run, c) : null;
+  if (now?.state !== 'SUCCEEDED' || !now.outcome) return no('NOT_VALIDATED', 'Validate the brief for this version before generating.');
+  if (now.outcome === 'FAIL') return no('VALIDATION_FAILED', 'The brief failed validation. Fix and revalidate.');
+  if (now.outcome === 'NEEDS_REVIEW') return no('NEEDS_REVIEW', 'The brief needs a person to review it before generating.');
+  return { ...base, eligible: true, reason: 'ELIGIBLE', message: 'The brief passed validation against the placeholder rules.', validation_run_id: now.validation_run_id };
+}
+
+/** What the fake validator says about any picture: nothing is inspected, so a person must look. */
+const IMAGE_RESULT: Pick<ValidationRunRead, 'outcome' | 'gates' | 'rule_results' | 'findings' | 'coverage_gaps'> = {
+  outcome: 'NEEDS_REVIEW',
+  gates: [{ gate: 'media', outcome: 'NEEDS_REVIEW' }],
+  rule_results: [{ rule_id: 'SIM-IMG-1', rule_version: 1, mandatory: false, result: 'FAIL', reason: null }],
+  findings: [{
+    rule_id: 'SIM-IMG-1', rule_version: 1, severity: 'minor',
+    explanation: 'Simulation: a person should look at the marked area of the picture.',
+    source: { source_id: 'sim-policy-bundle', clause: 'Placeholder image clause', excerpt: null },
+    text_span: null, image_region: { x: 0.12, y: 0.55, width: 0.76, height: 0.22 },
+    offending_excerpt: null, suggested_correction: null, needs_human_decision: true,
+  }],
+  coverage_gaps: [{ rule_id: null, reason: 'Simulation: the picture itself is not inspected.' }],
+};
 
 /** The asset with a short-lived link: a labelled placeholder picture, clearly not a real generated image. */
 function assetRead(a: MockAsset) {
@@ -713,10 +873,10 @@ function draftSummary(req: MockRequest, c: MockCreative) {
 
 const LATENCY_MS = 150;
 
-export const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+export const json = (status: number, body: unknown, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
-export const problem = (status: number, code: string, message: string, retryable = false, details?: unknown) =>
+export const problem = (status: number, code: string, message: string, retryable = false, details?: unknown): Response =>
   json(status, { code, message, request_id: `sim-${crypto.randomUUID().slice(0, 8)}`, retryable, details });
 
 function match(method: string, path: string): { handler: Handler; params: Record<string, string> } | null {

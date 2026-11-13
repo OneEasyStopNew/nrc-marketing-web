@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode, type ReactElement } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/Misc';
@@ -35,13 +35,13 @@ class Boundary extends Component<{ children: ReactNode }, State> {
 }
 
 /** One boundary per address: moving to another page clears the error. */
-export function PageErrorBoundary({ children }: { children: ReactNode }) {
+export function PageErrorBoundary({ children }: { children: ReactNode }): ReactElement {
   const { pathname } = useLocation();
   return <Boundary key={pathname}>{children}</Boundary>;
 }
 
 /** Last resort for a crash outside any page (the router's errorElement). */
-export function AppCrash() {
+export function AppCrash(): ReactElement {
   return (
     <main style={{ padding: 24, fontFamily: 'system-ui, sans-serif', maxWidth: 560, margin: '64px auto' }}>
       <h1 style={{ fontSize: 22, margin: '0 0 8px' }}>NRC Marketing stopped working</h1>

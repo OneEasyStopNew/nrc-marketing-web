@@ -1,7 +1,7 @@
 # Validation contract (NRC-19 frontend, NRC-7/NRC-8 backend)
 
 Source of truth: `contracts/openapi.json` in `OneEasyStopNew/nrc-marketing-api` (commit `2c65c7e`); types in
-`src/api/schema.d.ts`. The backend returns `501 NOT_IMPLEMENTED` for these endpoints until D2 ships; the UI then
+`src/api/schemas.gen.ts` (`npm run gen:api`). The backend returns `501 NOT_IMPLEMENTED` for these endpoints until D2 ships; the UI then
 says "Validation is not available yet". Paths are relative to `/v1/marketing`.
 
 | Method and path | Use in the UI |

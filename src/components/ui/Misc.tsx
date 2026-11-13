@@ -1,4 +1,4 @@
-import { Children, type ReactNode } from 'react';
+import { Children, type ReactNode, type ReactElement } from 'react';
 import { useMediaQuery } from '@astryxdesign/core/hooks';
 import { Avatar as AxAvatar } from '@astryxdesign/core/Avatar';
 import { Badge as AxBadge } from '@astryxdesign/core/Badge';
@@ -36,7 +36,7 @@ export interface Tab<T extends string> {
 }
 
 /** Tabs that switch content on the page. A count shows as a Badge after the label. */
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Tab<T>[]; value: T; onChange: (v: T) => void; pill?: boolean; className?: string }) {
+export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Tab<T>[]; value: T; onChange: (v: T) => void; pill?: boolean; className?: string }): ReactElement {
   return (
     <TabList value={value} onChange={(v) => onChange(v as T)} role="tablist" hasDivider>
       {tabs.map((t) => (
@@ -49,7 +49,7 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Tab<T>
 }
 
 /** Segmented control for a view switch. */
-export function Seg<T extends string>({ options, value, onChange, label = 'View' }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void; className?: string; label?: string }) {
+export function Seg<T extends string>({ options, value, onChange, label = 'View' }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void; className?: string; label?: string }): ReactElement {
   return (
     <SegmentedControl label={label} value={value} onChange={(v) => onChange(v as T)}>
       {options.map((o) => <SegmentedControlItem key={o.id} value={o.id} label={o.label} />)}
@@ -59,7 +59,7 @@ export function Seg<T extends string>({ options, value, onChange, label = 'View'
 
 /* ---------- Breadcrumbs, pager ---------- */
 
-export function Breadcrumbs({ items, badge }: { items: { label: ReactNode; to?: string; mono?: boolean }[]; badge?: ReactNode; className?: string }) {
+export function Breadcrumbs({ items, badge }: { items: { label: ReactNode; to?: string; mono?: boolean }[]; badge?: ReactNode; className?: string }): ReactElement {
   return (
     <HStack gap={2} vAlign="center">
       <AxBreadcrumbs variant="supporting">
@@ -72,7 +72,7 @@ export function Breadcrumbs({ items, badge }: { items: { label: ReactNode; to?: 
   );
 }
 
-export function Pager({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void; className?: string }) {
+export function Pager({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void; className?: string }): ReactElement | null {
   if (pages <= 1) return null;
   return <Pagination page={page} totalPages={pages} onChange={onChange} />;
 }
@@ -82,7 +82,7 @@ export function Pager({ page, pages, onChange }: { page: number; pages: number; 
 /** Says what happened and what to do next; one action. */
 export function EmptyState({ icon = 'info', title, description, action, kind = 'first' }: {
   icon?: IconName; title: string; description?: ReactNode; action?: ReactNode; kind?: 'first' | 'none' | 'locked'; className?: string;
-}) {
+}): ReactElement {
   const text = typeof description === 'string';
   const rich = !!description && !text;
   return (
@@ -100,21 +100,21 @@ export function EmptyState({ icon = 'info', title, description, action, kind = '
   );
 }
 
-export function Spinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
+export function Spinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg'; className?: string }): ReactElement {
   return <span data-loading=""><AxSpinner size={size} /></span>;
 }
 
 /** Whole-page load. Always says what is loading. */
-export function PageLoader({ label = 'Loading' }: { label?: string }) {
+export function PageLoader({ label = 'Loading' }: { label?: string }): ReactElement {
   return <span data-loading=""><Center minHeight={256}><AxSpinner size="lg" label={label} /></Center></span>;
 }
 
-export function Skeleton({ style }: { className?: string; style?: React.CSSProperties }) {
+export function Skeleton({ style }: { className?: string; style?: React.CSSProperties }): ReactElement {
   return <span aria-hidden data-loading=""><AxSkeleton height={style?.height ?? 14} width={style?.width ?? '100%'} /></span>;
 }
 
 /** Skeleton rows standing in for a list while it loads. */
-export function SkeletonRows({ rows = 3 }: { rows?: number; className?: string }) {
+export function SkeletonRows({ rows = 3 }: { rows?: number; className?: string }): ReactElement {
   return (
     <div aria-hidden data-loading="">
       <VStack gap={3}>
@@ -135,7 +135,7 @@ const TONE_STATUS: Record<Tone, 'info' | 'success' | 'warning' | 'error'> = {
  * An inline message that stays until the condition clears (Astryx Banner).
  * Blocked messages are announced (role="alert").
  */
-export function Alert({ tone = 'info', icon, title, children, action }: { tone?: Tone; icon?: IconName; title?: ReactNode; children?: ReactNode; action?: ReactNode; className?: string }) {
+export function Alert({ tone = 'info', icon, title, children, action }: { tone?: Tone; icon?: IconName; title?: ReactNode; children?: ReactNode; action?: ReactNode; className?: string }): ReactElement {
   return (
     <div role={tone === 'blocked' ? 'alert' : undefined}>
       <Banner
@@ -155,7 +155,7 @@ export function Alert({ tone = 'info', icon, title, children, action }: { tone?:
 export function ProgressBar({ value, max = 100, tone, label, valueLabel, ariaLabel }: {
   value: number; max?: number; tone?: 'brand' | 'done' | 'waiting' | 'blocked' | 'regulatory' | 'neutral'; label?: ReactNode; valueLabel?: ReactNode; lg?: boolean; className?: string;
   ariaLabel?: string;
-}) {
+}): ReactElement {
   const variant = ({ brand: 'accent', regulatory: 'accent', done: 'success', waiting: 'warning', blocked: 'error', neutral: 'neutral' } as const)[tone ?? 'brand'];
   return (
     <VStack gap={2}>
@@ -174,20 +174,21 @@ export function ProgressBar({ value, max = 100, tone, label, valueLabel, ariaLab
 
 export function Avatar({ initials, name, size = 'md', title }: {
   id?: string; initials: string; name?: string; size?: 'sm' | 'md' | 'lg' | 'xl'; square?: boolean; status?: 'online' | 'away'; tone?: 1 | 2 | 3 | 4 | 'muted'; className?: string; title?: string;
-}) {
+}): ReactElement {
   return <AxAvatar name={name ?? title ?? initials} size={size} tooltip={title ?? false} />;
 }
 
 /* ---------- List ---------- */
 
 /** A list of rows with dividers (Astryx List). Rows that navigate end in a chevron. */
-export function List({ children }: { children: ReactNode; className?: string; label?: string }) {
+export function List({ children }: { children: ReactNode; className?: string; label?: string }): ReactElement {
   return <AxList hasDividers>{children}</AxList>;
 }
 
-export function ListItem({ lead, title, sub, right, onClick, chevron, selected }: {
-  lead?: ReactNode; title: ReactNode; sub?: ReactNode; right?: ReactNode; onClick?: () => void; chevron?: boolean; className?: string; selected?: boolean;
-}) {
+/** A list row. Use `href` for navigation (a real link: new tab, copy link) and `onClick` only for actions. */
+export function ListItem({ lead, title, sub, right, onClick, href, chevron, selected }: {
+  lead?: ReactNode; title: ReactNode; sub?: ReactNode; right?: ReactNode; onClick?: () => void; href?: string; chevron?: boolean; className?: string; selected?: boolean;
+}): ReactElement {
   return (
     <AxListItem
       label={title}
@@ -195,6 +196,7 @@ export function ListItem({ lead, title, sub, right, onClick, chevron, selected }
       startContent={lead}
       endContent={right || chevron ? <HStack gap={2} vAlign="center">{right}{chevron && <Icon name="chev-right" color="secondary" />}</HStack> : undefined}
       onClick={onClick}
+      href={href}
       isSelected={selected}
     />
   );
@@ -206,7 +208,7 @@ export function ListItem({ lead, title, sub, right, onClick, chevron, selected }
 export function PageHeader({ crumbs, title, description, actions, badge, info }: {
   crumbs?: { label: ReactNode; to?: string; mono?: boolean }[]; title: ReactNode; description?: ReactNode; actions?: ReactNode; badge?: ReactNode; className?: string;
   info?: string;
-}) {
+}): ReactElement {
   return (
     <VStack gap={2}>
       {crumbs && <Breadcrumbs items={crumbs} />}
@@ -234,7 +236,7 @@ export function PageHeader({ crumbs, title, description, actions, badge, info }:
  * stacked on narrow ones. The first child is the main column, the second the
  * side column; anything after (dialogs) renders as is.
  */
-export function TwoColumn({ children }: { children: ReactNode }) {
+export function TwoColumn({ children }: { children: ReactNode }): ReactElement {
   const narrow = useMediaQuery('(max-width: 1100px)');
   const [main, side, ...rest] = Children.toArray(children);
   return (

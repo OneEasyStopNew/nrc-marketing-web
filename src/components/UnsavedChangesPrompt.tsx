@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactElement } from 'react';
 import { Text } from '@astryxdesign/core/Text';
 import { useBlocker } from 'react-router-dom';
 import { Modal } from '@/components/ui/Overlay';
@@ -10,9 +10,9 @@ import { Button } from '@/components/ui/Button';
  * `when` is read at navigation time, so a page can clear it and navigate in
  * the same handler (e.g. after "Create draft" succeeds).
  */
-export function UnsavedChangesPrompt({ when, message }: { when: boolean; message: string }) {
+export function UnsavedChangesPrompt({ when, message }: { when: boolean; message: string }): ReactElement {
   const active = useRef(when);
-  active.current = when;
+  useLayoutEffect(() => { active.current = when; }, [when]);
 
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
     active.current && currentLocation.pathname !== nextLocation.pathname);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList';
 import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
 import { Text } from '@astryxdesign/core/Text';
@@ -17,7 +17,8 @@ import { EmptyState, PageHeader, Tabs } from '@/components/ui/Misc';
 import { Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { useMembers, useWorkspaceMutation } from '@/pages/shared/queries';
-import { QueryState, ROLE_LABEL, useIsSimulation } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment, QueryState, ROLE_LABEL, useIsSimulation } from '@/pages/shared/ui';
 
 type Role = Member['roles'][number];
 type Filter = 'ACTIVE' | 'INVITED' | 'SUSPENDED';
@@ -41,17 +42,28 @@ const STATUS_BADGE: Record<Member['status'], { label: string; tone: 'done' | 'wa
  * roles. Sign-in itself is handled by the identity provider; this page only
  * manages roles inside the tenant.
  */
-export default function TeamPage() {
-  const members = useMembers();
+export default function TeamPage(): ReactElement {
+  // Not fetched while team management is in development: the backend has no /members yet.
+  const members = useMembers(!IN_DEVELOPMENT.team);
   const [filter, setFilter] = useState<Filter>('ACTIVE');
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<Member | 'new' | null>(null);
-  const all = members.data ?? [];
+  const all = useMemo(() => members.data ?? [], [members.data]);
   const count = (s: Filter) => all.filter((m) => m.status === s).length;
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((m) => m.status === filter && (!q || `${m.name} ${m.email}`.toLowerCase().includes(q)));
   }, [all, filter, search]);
+
+  // Team management is in no ticket yet (config/inDevelopment.ts).
+  if (IN_DEVELOPMENT.team) {
+    return (
+      <VStack gap={8}>
+        <PageHeader title="Team" description="Who works in Marketing for this organisation, and what each person may do." />
+        <InDevelopment feature="Team management" description="Inviting people and setting their roles is being built and will be available soon." />
+      </VStack>
+    );
+  }
 
   return (
     <VStack gap={8}>
