@@ -80,7 +80,7 @@ export function StudyFacts({ study }: { study: StudySnapshot }): ReactElement {
           <Text type="body" weight="semibold">Approved study facts</Text>
           <Text type="supporting" color="secondary">Read-only</Text>
           <StackItem size="fill">{null}</StackItem>
-          {study.is_synthetic && <Badge variant="waiting">Demo study</Badge>}
+          {study.is_synthetic && <Badge variant="waiting">Synthetic staging study</Badge>}
           {study.recruitment_status === 'recruiting' ? <Badge variant="done">Recruiting</Badge> : <Badge>Closed</Badge>}
         </HStack>
         <MetadataList>

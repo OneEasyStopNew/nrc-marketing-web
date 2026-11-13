@@ -5,6 +5,9 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
+/** UI names use Staging terminology; never apply this to IDs, source references or content. */
+export const stagingLabel = (name: string): string => name.replace(/\bdemo\b/gi, 'Staging');
+
 /** Characters as people count them (Unicode code points): "ñ" and "😀" are one each. */
 export const charCount = (s: string): number => [...s].length;
 

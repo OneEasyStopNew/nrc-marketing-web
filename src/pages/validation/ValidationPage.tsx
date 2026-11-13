@@ -239,7 +239,7 @@ function Workspace() {
                     {image.data && (
                       <Text type="supporting" color="secondary">
                         {image.data.width_px}×{image.data.height_px}
-                        {isPlaceholderImage(image.data) && ' · placeholder picture from the demo service, not a generated image'}
+                        {isPlaceholderImage(image.data) && ' · placeholder picture from the staging service, not a generated image'}
                       </Text>
                     )}
                     {r.findings.filter((f) => f.image_region).map((f, i) => (

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { stagingLabel } from '@/lib/utils';
 import { http, requestWithMeta } from './http';
 
 /**
@@ -29,7 +30,7 @@ export type ReviewState = z.infer<typeof ReviewState>;
 const DraftSummarySchema = z.object({
   id: z.string(),
   study_id: z.string(),
-  study_title: z.string(),
+  study_title: z.string().transform(stagingLabel),
   version: z.number().int(),
   prompt_preview: z.string(),
   updated_at: isoDateTime,
@@ -131,7 +132,7 @@ const ApprovalRequestSchema = z.object({
   approval_id: z.string(),
   creative_id: z.string(),
   creative_version: z.number().int(),
-  study_title: z.string(),
+  study_title: z.string().transform(stagingLabel),
   caption: z.string(),
   prompt: z.string(),
   channel_label: z.string(),
@@ -185,7 +186,7 @@ const PublicationSchema = z.object({
   publication_id: z.string(),
   creative_id: z.string(),
   creative_version: z.number().int(),
-  study_title: z.string(),
+  study_title: z.string().transform(stagingLabel),
   caption: z.string(),
   publish_at: isoDateTime.nullable(),
   timezone: z.string(),
