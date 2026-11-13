@@ -2,11 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { lightTheme, seen, signInAt } from './helpers';
 
 /**
- * NRC-21 demo slice in simulation mode: Generate from a validated version,
- * durable progress, refresh recovery, no duplicate jobs, and the refused,
- * unconfirmed (UNKNOWN) and limit states. Uses the seeded draft sim-cr-0001,
- * whose version 3 passed validation (local src/mocks/data.ts); the creator
- * needs the generation:run capability there.
+ * Image generation and the caption and image checks, in simulation mode
+ * (fixtures from the local src/mocks/data.ts). The fake API makes a labelled
+ * placeholder picture, never a real image. The seeded draft sim-cr-0001 is at
+ * version 3 with a current PASS result.
  */
 
 let pageErrors: string[] = [];
@@ -18,92 +17,85 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
 
 const SEEDED = '/marketing/create/sim-cr-0001';
-const generate = (page: Page) => page.getByRole('button', { name: 'Generate image' });
-/**
- * Text on screen in the generation panel. The panel's screen-reader status
- * region repeats its titles, and `seen` only skips Astryx's own live regions.
- */
-const shown = (page: Page, text: string | RegExp) =>
-  seen(page, text).and(page.locator(':not([role="status"]):not([role="status"] *)'));
-/** A job page: job ids are UUIDs, also in simulation, because the app refuses any other id in a path. */
-const JOB_URL = /\/generation\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const brief = (page: Page) => page.getByRole('textbox', { name: /^Brief/ });
+const generate = (page: Page) => page.getByRole('button', { name: /^Generate (image|a new image)$/ });
 
-/**
- * Jobs the fake server has made in this tab. Simulation replaces fetch inside
- * the page, so Playwright's network events never see API calls; the fake
- * server's stored jobs are the reliable count of what the backend would hold.
- */
-const storedJobs = (page: Page) =>
-  page.evaluate(() => (JSON.parse(sessionStorage.getItem('nrc.sim.jobs') ?? '[]') as { final: { job_id: string } }[]).map((j) => j.final.job_id));
+test('a new draft cannot be generated until its brief passes', async ({ page }) => {
+  await signInAt(page, '/marketing/create', 'creator');
+  await brief(page).fill('Placeholder brief for a generation test, long enough to be assessed by the placeholder rules.');
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page).toHaveURL(/\/marketing\/create\/[^/]+$/);
 
-test('generates an image with progress and finds the same job after a reload', async ({ page }) => {
+  await expect(seen(page, 'Validate the brief for this version before generating.').first()).toBeVisible();
+  await expect(generate(page)).toBeDisabled();
+});
+
+test('a passed brief can be generated; the job survives a reload and the image can be checked', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  await expect(seen(page, 'Allowed', { exact: true })).toBeVisible();
+
+  await generate(page).click();
+  await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
+  // Reload mid-job (tokens live in memory, so sign in again): the same job is followed, no second one is started.
+  await page.reload();
+  await page.locator('li button', { hasText: 'Marketing creator' }).click();
+  await page.waitForURL((u) => u.pathname === SEEDED);
+  await expect(seen(page, 'Image ready')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('img', { name: /Image for this draft \(placeholder picture\)/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Check image' }).click();
+  await expect(page).toHaveURL(/\/marketing\/validation\/sim-cr-0001\//);
+  await expect(page.getByRole('heading', { name: 'Checked image' })).toBeVisible();
+  await expect(seen(page, 'A person needs to decide on the findings marked below.')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('img', { name: /The visual that was checked/ })).toBeVisible();
+  await expect(seen(page, /starts 12% from the left and 55% from the top/).first()).toBeVisible();
+
+  // Back on the draft, the image check is listed with its result; passing the brief is still not approval.
+  await page.getByRole('link', { name: 'Revise the brief' }).click();
+  await expect(page).toHaveURL(new RegExp(`${SEEDED}$`));
+  await expect(page.getByRole('link', { name: 'Image check results' })).toBeVisible();
+  await expect(seen(page, 'Validation is an automated check, not an approval.')).toBeVisible();
+});
+
+test('an edit turns generation off until the new version is validated', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
   await expect(generate(page)).toBeEnabled();
-  await generate(page).click();
-
-  await expect(page).toHaveURL(JOB_URL);
-  await expect(page.getByRole('progressbar', { name: 'Image generation progress' })).toBeVisible();
+  await brief(page).press('Control+End');
+  await brief(page).pressSequentially(' More.');
   await expect(generate(page)).toBeDisabled();
-  const jobUrl = page.url();
-
-  // A reload while it runs (signing in again on the way): the job id in the path brings back the same job.
-  await signInAt(page, jobUrl.replace(/^https?:\/\/[^/]+/, ''), 'creator');
-  await expect(page).toHaveURL(jobUrl);
-  await expect(seen(page, 'Image saved', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  expect(await storedJobs(page)).toHaveLength(1);
-
-  await expect(seen(page, 'Simulation, not a real generated image')).toBeVisible();
-  await expect(seen(page, /still needs its final validation/)).toBeVisible();
-  await expect(page.getByRole('img', { name: /simulation placeholder/ })).toBeVisible();
+  await expect(seen(page, 'Save your changes, then validate this version.').first()).toBeVisible();
 });
 
-test('a double click makes one job', async ({ page }) => {
+/**
+ * Jobs the fake API has made in this tab. Simulation replaces fetch inside the
+ * page, so Playwright's network events never see API calls; the fake API's
+ * stored jobs are the reliable count of what the backend would hold.
+ */
+const storedJobIds = (page: Page) =>
+  page.evaluate(() => (JSON.parse(sessionStorage.getItem('nrc.sim.jobs') ?? '[]') as { job_id: string }[]).map((j) => j.job_id));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+test('a double click starts one job, with a UUID like the API issues', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
+  await expect(generate(page)).toBeEnabled();
   await generate(page).dblclick();
-  await expect(page).toHaveURL(JOB_URL);
-  expect(await storedJobs(page)).toHaveLength(1);
+  await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
+  const ids = await storedJobIds(page);
+  expect(ids).toHaveLength(1);
+  expect(ids[0]).toMatch(UUID);
 });
 
-test('a lost response is retried as the same command and finds the job it made', async ({ page }) => {
+test('a tampered job reference in this tab is ignored, and Generate stays available', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
-  await page.getByRole('button', { name: 'Lose the answer to the next Generate' }).click();
-  await generate(page).click();
-  // The server made the job, but the browser never heard back.
-  await expect(shown(page, 'No answer from NRC Marketing')).toBeVisible();
-  const made = await storedJobs(page);
-  expect(made).toHaveLength(1);
-
-  await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page).toHaveURL(new RegExp(`/generation/${made[0]}$`));
-  expect(await storedJobs(page)).toEqual(made);
-});
-
-test('a refused image explains what to do', async ({ page }) => {
-  await signInAt(page, SEEDED, 'creator');
-  await page.getByRole('button', { name: 'Image service refuses the next image' }).click();
-  await generate(page).click();
-  await expect(shown(page, 'The image was not made')).toBeVisible({ timeout: 15_000 });
-  await expect(seen(page, /refused this brief under its content rules/)).toBeVisible();
-});
-
-test('an unconfirmed job turns Generate off and says it is being checked', async ({ page }) => {
-  await signInAt(page, SEEDED, 'creator');
-  await page.getByRole('button', { name: 'Next image stays unconfirmed' }).click();
-  await generate(page).click();
-  await expect(shown(page, 'Confirming with the image service')).toBeVisible({ timeout: 15_000 });
-  await expect(generate(page)).toBeDisabled();
-});
-
-test('the daily limit is shown and nothing starts', async ({ page }) => {
-  await signInAt(page, SEEDED, 'creator');
-  await page.getByRole('button', { name: 'Next Generate hits the daily limit' }).click();
-  await generate(page).click();
-  await expect(shown(page, /today's image allowance/)).toBeVisible();
-  await expect(page).not.toHaveURL(/\/generation\//);
-});
-
-test('an edited brief needs validation again before Generate', async ({ page }) => {
-  await signInAt(page, SEEDED, 'creator');
-  await page.getByRole('textbox', { name: /^Brief/ }).fill('A changed brief for the simulation, written to need a new validation run.');
-  await expect(generate(page)).toBeDisabled();
+  await expect(generate(page)).toBeEnabled();
+  // A job id that is not a UUID must never reach a request path.
+  await page.evaluate(() => sessionStorage.setItem(
+    Object.keys(sessionStorage).find((k) => k.startsWith('nrc.job.')) ?? 'nrc.job.x.sim-cr-0001',
+    JSON.stringify({ job_id: '../../admin', version: 3 }),
+  ));
+  await page.reload();
+  await page.locator('li button', { hasText: 'Marketing creator' }).click();
+  await page.waitForURL((u) => u.pathname === SEEDED);
+  await expect(generate(page)).toBeEnabled();
+  expect(await storedJobIds(page)).toHaveLength(0);
 });

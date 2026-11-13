@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import type { Creative } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
-import { isTerminal, newValidationKey, validationsApi, type ValidationInputKind } from '@/api/validations';
+import { isTerminal, newValidationKey, validationsApi, type ValidationInputKind, type ValidationRun } from '@/api/validations';
 import { useToast } from '@/components/ui/Toast';
+import { rememberRun } from './knownRuns';
 
 const FIRST_POLL_MS = 1000;
 const MAX_POLL_MS = 10_000;
@@ -15,15 +16,17 @@ const MAX_POLL_MS = 10_000;
  * open tabs do not poll in step. Polling pauses while the tab is hidden
  * (TanStack Query's default) and stops at a terminal state or an error.
  */
-export const pollDelay = (attempt: number, random = Math.random) =>
+export const pollDelay = (attempt: number, random = Math.random): number =>
   Math.round(Math.min(FIRST_POLL_MS * 1.5 ** attempt, MAX_POLL_MS) * (0.8 + 0.4 * random()));
 
 /** One validation run, polled until it finishes. The run id lives in the URL, so a reload picks it up again. */
-export function useValidationRun(runId: string) {
+export function useValidationRun(runId: string | null | undefined): UseQueryResult<ValidationRun> {
   const { context } = useSession();
   return useQuery({
     queryKey: ['validation', context.tenant.tenant_id, runId],
-    queryFn: ({ signal }) => validationsApi.get(runId, signal),
+    // enabled guarantees runId is set when this runs.
+    queryFn: ({ signal }) => validationsApi.get(runId!, signal),
+    enabled: !!runId,
     refetchInterval: (q) => {
       const run = q.state.data;
       if (!run || q.state.error || isTerminal(run.state)) return false;
@@ -34,22 +37,37 @@ export function useValidationRun(runId: string) {
   });
 }
 
+/** Starting a validation run, and which kind is starting right now. */
+export interface StartValidation {
+  start: (creative: Creative, inputKind?: ValidationInputKind, assetId?: string | null) => Promise<void>;
+  starting: boolean;
+  startingKind: ValidationInputKind | null;
+}
+
 /** Starts a run for a saved version and opens its results. */
-export function useStartValidation() {
+export function useStartValidation(): StartValidation {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [starting, setStarting] = useState(false);
+  const { context } = useSession();
+  const [startingKind, setStartingKind] = useState<ValidationInputKind | null>(null);
   /** Same key when the same request is retried; a new one for anything else. */
   const pending = useRef<{ body: string; key: string } | null>(null);
 
-  const start = async (creative: Creative, inputKind: ValidationInputKind = 'brief') => {
-    const body = { creative_id: creative.id, creative_version: creative.version, input_kind: inputKind };
+  /** `assetId` is needed for an image run: it names the exact image to check. */
+  const start = async (creative: Creative, inputKind: ValidationInputKind = 'brief', assetId?: string | null) => {
+    const body = {
+      creative_id: creative.id, creative_version: creative.version, input_kind: inputKind,
+      ...(inputKind === 'image' && assetId ? { asset_id: assetId } : {}),
+    };
     const sig = JSON.stringify(body);
     if (pending.current?.body !== sig) pending.current = { body: sig, key: newValidationKey() };
-    setStarting(true);
+    setStartingKind(inputKind);
     try {
       const accepted = await validationsApi.start(body, pending.current.key);
       pending.current = null;
+      rememberRun(context.tenant.tenant_id, creative.id, {
+        id: accepted.validation_run_id, kind: inputKind, version: creative.version, asset_id: assetId ?? null,
+      });
       navigate(`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(accepted.validation_run_id)}`);
     } catch (e) {
       if (!isApiError(e)) throw e;
@@ -59,9 +77,9 @@ export function useStartValidation() {
       else toast('Validation could not start', 'blocked', e.retryable ? 'Try again in a moment.' : e.message);
       if (!e.retryable) pending.current = null;
     } finally {
-      setStarting(false);
+      setStartingKind(null);
     }
   };
 
-  return { start, starting };
+  return { start, starting: startingKind !== null, startingKind };
 }

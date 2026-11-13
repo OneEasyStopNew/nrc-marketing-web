@@ -1,4 +1,4 @@
-import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
+import type { ComponentProps, HTMLAttributes, ReactNode, ReactElement } from 'react';
 import { Badge as AxBadge } from '@astryxdesign/core/Badge';
 import { Icon, type IconName } from './Icon';
 
@@ -29,7 +29,7 @@ const AX: Record<BadgeVariant, NonNullable<ComponentProps<typeof AxBadge>['varia
   regulatory: 'purple', solid: 'neutral', count: 'neutral',
 };
 
-export function Badge({ variant = 'neutral', icon, dot: _dot, mono: _mono, children, className: _className, ...props }: BadgeProps) {
+export function Badge({ variant = 'neutral', icon, dot: _dot, mono: _mono, children, className: _className, ...props }: BadgeProps): ReactElement {
   return (
     <AxBadge
       {...(props as object)}

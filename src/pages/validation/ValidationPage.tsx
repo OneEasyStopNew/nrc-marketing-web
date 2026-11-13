@@ -1,11 +1,16 @@
 import { SIMULATION_BUILD } from '@/config/env';
+import { z } from 'zod';
+import { useNow } from '@/lib/useNow';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { VStack } from '@astryxdesign/core/Layout';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Link, Route, Routes, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth, useSession } from '@/auth/AuthProvider';
+import { isPlaceholderImage, useAsset } from '@/api/assets';
 import { creativesApi } from '@/api/creatives';
+import { ruleLookup, useActivePolicy } from '@/api/policy';
+import { AspectRatio } from '@astryxdesign/core/AspectRatio';
 import { isApiError } from '@/api/errors';
 import { http } from '@/api/http';
 import { isInProgress } from '@/api/validations';
@@ -20,12 +25,13 @@ import { Text } from '@astryxdesign/core/Text';
 import type { DraftSummary } from '@/api/workspace';
 import { Tabs } from '@/components/ui/Misc';
 import { useDrafts } from '@/pages/shared/queries';
-import { QueryState, ReviewBadge, StatCard, ValidationBadge, relTime } from '@/pages/shared/ui';
-import { EvidenceText, FindingsList, findingKey, RunSummary, Verdict } from './parts';
+import { InDevelopment, QueryState, ReviewBadge, StatCard, ValidationBadge, relTime } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { EvidenceText, FindingsList, findingKey, KIND_WORD, regionWords, RunSummary, Verdict } from './parts';
 import { useStartValidation, useValidationRun } from './useValidation';
 
 /** /marketing/validation (how to start) and /marketing/validation/:creativeId/:runId (one run's results). */
-export default function ValidationPage() {
+export default function ValidationPage(): ReactElement {
   return (
     <Routes>
       <Route index element={<Start />} />
@@ -43,12 +49,24 @@ type ValidationFilter = (typeof VALIDATION_FILTERS)[number]['id'];
 const NEEDS_ATTENTION = new Set<DraftSummary['validation']>(['FAIL', 'NEEDS_REVIEW', 'STALE', 'NOT_RUN', 'RUNNING']);
 
 function Start() {
-  const drafts = useDrafts();
+  // The backend has no draft list yet (config/inDevelopment.ts): do not call it.
+  const drafts = useDrafts(!IN_DEVELOPMENT.draftList);
   const [filter, setFilter] = useState<ValidationFilter>('attention');
   const all = drafts.data ?? [];
   const pick = (f: ValidationFilter) => all.filter((d) => f === 'all' || (f === 'passed' ? d.validation === 'PASS' : NEEDS_ATTENTION.has(d.validation)));
   const rows = pick(filter);
   const n = (v: DraftSummary['validation']) => all.filter((d) => d.validation === v).length;
+  const now = useNow();
+  const columns = useMemo(() => validationColumns(now), [now]);
+
+  if (IN_DEVELOPMENT.draftList) {
+    return (
+      <VStack gap={6}>
+        <PageHeader title="Validation" description="Automated checks of a brief against the approved study facts and the policy rules, with the evidence for each finding." />
+        <InDevelopment feature="Drafts overview" description="A list of every draft with its latest check is being built and will be available soon. To validate, open a draft in Create post and choose Validate; its results open here." />
+      </VStack>
+    );
+  }
 
   return (
     <VStack gap={6}>
@@ -66,7 +84,7 @@ function Start() {
         </>
         <QueryState query={drafts} what="your drafts">
           {() => rows.length
-            ? <><Table<DraftSummary> data={rows} columns={validationColumns} idKey="id" hasHover /></>
+            ? <><Table<DraftSummary> data={rows} columns={columns} idKey="id" hasHover /></>
             : <EmptyState icon="shield" title={filter === 'attention' ? 'Nothing needs attention' : 'No drafts here'}
                 description="Open a saved draft in Create and choose Validate. Its results open here."
                 action={<Button variant="secondary" href="/marketing/create">Go to Create post</Button>} />}
@@ -76,7 +94,7 @@ function Start() {
   );
 }
 
-const validationColumns: TableColumn<DraftSummary>[] = [
+const validationColumns = (now: number): TableColumn<DraftSummary>[] => [
   {
     key: 'prompt_preview', header: 'Brief', width: proportional(3, { minWidth: 240 }),
     renderCell: (d) => (
@@ -88,7 +106,7 @@ const validationColumns: TableColumn<DraftSummary>[] = [
   },
   { key: 'validation', header: 'Validation', width: pixel(160), renderCell: (d) => <ValidationBadge value={d.validation} /> },
   { key: 'review', header: 'Review', width: pixel(170), renderCell: (d) => <ReviewBadge value={d.review} /> },
-  { key: 'updated_at', header: 'Updated', width: pixel(120), renderCell: (d) => <Text type="supporting">{relTime(d.updated_at)}</Text> },
+  { key: 'updated_at', header: 'Updated', width: pixel(120), renderCell: (d) => <Text type="supporting">{relTime(d.updated_at, now)}</Text> },
 ];
 
 function Workspace() {
@@ -108,13 +126,20 @@ function Workspace() {
   const r = run.data;
 
   // The exact text this run checked: the current version, or that version from the history.
+  // A version's text never changes, so the version number identifies it; `creative` is only the way to read it.
+  // eslint-disable-next-line @tanstack/query/exhaustive-deps -- see the line above
   const checked = useQuery({
     queryKey: ['creative-version-text', context.tenant.tenant_id, creativeId, r?.creative_version],
+    // enabled guarantees creative and r are set when this runs.
     queryFn: ({ signal }) => creativesApi.versionText(creative!, r!.creative_version, signal),
     enabled: !!creative && !!r && r.input_kind !== 'image',
     staleTime: Infinity,
   });
   const checkedText = checked.data ? (r?.input_kind === 'text' ? checked.data.caption : checked.data.prompt) : null;
+  // The exact picture an image run checked, and the rules its findings cite.
+  const image = useAsset(r?.input_kind === 'image' ? r.asset_id : null);
+  const policy = useActivePolicy();
+  const policyName = r && context.active_policy?.version === r.policy_bundle_version ? context.active_policy.name : undefined;
 
   // A run that finished changes the draft's readiness: refresh it.
   const finished = r ? !isInProgress(r.state) : false;
@@ -168,7 +193,7 @@ function Workspace() {
   }
 
   const simulate = async (mode: 'timeout' | 'extraction') => {
-    await http.post('/__sim/fail-next-validation', { mode });
+    await http.post('/__sim/fail-next-validation', z.unknown(), { mode });
     toast(mode === 'timeout' ? 'The next validation will time out' : 'The next validation cannot read the text', 'waiting');
   };
 
@@ -179,7 +204,7 @@ function Workspace() {
           <>
             <Button variant="secondary" href={draftLink}>Revise the brief</Button>
             {canValidate && (stale || r.state === 'FAILED' || r.state === 'CANCELLED') && (
-              <Button variant="primary" loading={starting} onClick={() => void start(creative, r.input_kind)}>
+              <Button variant="primary" loading={starting} onClick={() => void start(creative, r.input_kind, r.asset_id)}>
                 Validate version {creative.version}
               </Button>
             )}
@@ -187,7 +212,7 @@ function Workspace() {
         )} />
 
       <VisuallyHidden><span role="status" aria-live="polite">
-        {isInProgress(r.state) ? 'Checking the brief' : 'Validation finished'}
+        {isInProgress(r.state) ? `Checking the ${KIND_WORD[r.input_kind]}` : 'Validation finished'}
       </span></VisuallyHidden>
       <Verdict run={r} stale={stale} />
 
@@ -195,13 +220,35 @@ function Workspace() {
         <VStack gap={6}>
           <Card>
             <CardHead title="Summary" icon="shield" regulatory />
-            <CardBody><RunSummary run={r} currentVersion={creative.version} stale={stale} /></CardBody>
+            <CardBody><RunSummary run={r} currentVersion={creative.version} stale={stale} policyName={policyName} /></CardBody>
           </Card>
           <Card>
-            <CardHead title={r.input_kind === 'text' ? 'Checked caption' : 'Checked brief'} />
+            <CardHead title={`Checked ${KIND_WORD[r.input_kind]}`} />
             <CardBody>
               {r.input_kind === 'image'
-                ? <Text type="body" color="secondary">Image evidence is shown once images are connected.</Text>
+                ? (
+                  <VStack gap={3}>
+                    {image.isPending && <SkeletonRows rows={4} />}
+                    {image.isError && <Alert tone="waiting" title="The image could not be loaded">Findings are listed with the area they point to.</Alert>}
+                    {image.data?.download_url && (
+                      <AspectRatio ratio={image.data.width_px / image.data.height_px} fit="contain">
+                        <img src={image.data.download_url}
+                          alt={`The visual that was checked${isPlaceholderImage(image.data) ? ' (a placeholder, not generated)' : ''}`} />
+                      </AspectRatio>
+                    )}
+                    {image.data && (
+                      <Text type="supporting" color="secondary">
+                        {image.data.width_px}×{image.data.height_px}
+                        {isPlaceholderImage(image.data) && ' · placeholder picture from the demo service, not a generated image'}
+                      </Text>
+                    )}
+                    {r.findings.filter((f) => f.image_region).map((f, i) => (
+                      <Text key={i} type="body" wordBreak="break-word">
+                        <Text type="body" weight="semibold">{f.rule_id}</Text> points to this area: {regionWords(f.image_region!)}
+                      </Text>
+                    ))}
+                  </VStack>
+                )
                 : checked.isError
                   ? <Alert tone="waiting" title="The checked text could not be loaded">Findings are listed without highlights.</Alert>
                   : checkedText == null
@@ -226,7 +273,7 @@ function Workspace() {
             <CardHead title="Findings" icon="flag" />
             {isInProgress(r.state)
               ? <CardBody><Text type="body" color="secondary">Findings appear when the run finishes.</Text></CardBody>
-              : <FindingsList findings={r.findings} selected={selected} onSelect={setSelected} canShowInText={checkedText != null} />}
+              : <FindingsList findings={r.findings} selected={selected} onSelect={setSelected} canShowInText={checkedText != null} ruleOf={ruleLookup(policy.data)} />}
           </Card>
           {SIMULATION_BUILD && mode === 'simulation' && canValidate && (
             <Card>

@@ -36,4 +36,4 @@ export function segmentByCodePoints<K>(text: string, spans: { key: K; span: Span
 }
 
 /** The text a span covers, by code points. */
-export const sliceByCodePoints = (text: string, span: Span) => [...text].slice(span.start, span.end).join('');
+export const sliceByCodePoints = (text: string, span: Span): string => [...text].slice(span.start, span.end).join('');

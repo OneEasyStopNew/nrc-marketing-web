@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
+import { exhaustive } from '@/lib/exhaustive';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { Blockquote } from '@astryxdesign/core/Blockquote';
@@ -9,6 +10,7 @@ import {
   GATES, isInProgress, passedAssessedChecks, unassessedMandatory,
   type ExecutionState, type Finding, type Gate, type Outcome, type Severity, type ValidationRun,
 } from '@/api/validations';
+import type { ActiveRule } from '@/api/policy';
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -34,7 +36,7 @@ const SEVERITY: Record<Severity, { label: string; variant: BadgeVariant; mark: s
 const SEVERITY_ORDER: Severity[] = ['critical', 'major', 'minor'];
 
 /** Execution state: is the run still working, did it finish, did it break. Never the policy result. */
-export function ExecutionBadge({ state }: { state: ExecutionState }) {
+export function ExecutionBadge({ state }: { state: ExecutionState }): ReactElement {
   const [variant, text]: [BadgeVariant, string] = (() => {
     switch (state) {
       case 'QUEUED': return ['neutral', 'Queued'];
@@ -45,14 +47,16 @@ export function ExecutionBadge({ state }: { state: ExecutionState }) {
       case 'FAILED': return ['blocked', 'Could not finish'];
       case 'CANCEL_REQUESTED': return ['waiting', 'Cancelling'];
       case 'CANCELLED': return ['neutral', 'Cancelled'];
-      default: return ['waiting', 'Status unknown'];
+      // The service could not confirm what happened: never shown as finished.
+      case 'UNKNOWN': return ['waiting', 'Status not confirmed'];
+      default: return exhaustive(state, ['waiting', 'Status unknown']);
     }
   })();
   return <Badge variant={variant}>{text}</Badge>;
 }
 
 /** Policy outcome, only once the run finished. PASS means the assessed checks passed, not approval. */
-export function OutcomeBadge({ outcome }: { outcome: Outcome | null }) {
+export function OutcomeBadge({ outcome }: { outcome: Outcome | null }): ReactElement {
   if (!outcome) return <Badge>No result yet</Badge>;
   if (outcome === 'PASS') return <Badge variant="done">Passed the assessed checks</Badge>;
   if (outcome === 'FAIL') return <Badge variant="blocked">Failed</Badge>;
@@ -73,7 +77,13 @@ function GateBadge({ outcome }: { outcome: Outcome | undefined }) {
  * show "Not assessed", never green; approval and publishing are separate
  * steps the validator does not decide.
  */
-export function RunSummary({ run, currentVersion, stale }: { run: ValidationRun; currentVersion: number | undefined; stale: boolean }) {
+export function RunSummary({ run, currentVersion, stale, policyName }: {
+  run: ValidationRun;
+  currentVersion: number | undefined;
+  stale: boolean;
+  /** Name of the tenant's active policy, shown when the run used that version. */
+  policyName?: string;
+}): ReactElement {
   const gateOutcome = (g: Gate) => run.gates.find((x) => x.gate === g)?.outcome;
   const done = !isInProgress(run.state);
   return (
@@ -90,7 +100,11 @@ export function RunSummary({ run, currentVersion, stale }: { run: ValidationRun;
           {currentVersion != null && currentVersion !== run.creative_version && <Text type="body" color="secondary"> (the draft is now version {currentVersion})</Text>}
         </Pair>
         <Pair k="Study snapshot">version {run.study_snapshot_version}</Pair>
-        <Pair k="Policy bundle">{run.policy_bundle_version ? <Text type="code">{run.policy_bundle_version}</Text> : <Text type="body" color="secondary">Not reported</Text>}</Pair>
+        <Pair k="Policy rules">
+          {run.policy_bundle_version != null
+            ? <>version {run.policy_bundle_version}{policyName && <Text type="body" color="secondary"> · {policyName}</Text>}</>
+            : <Text type="body" color="secondary">Not reported</Text>}
+        </Pair>
         <Pair k="Evaluated">{run.evaluated_at ? fmtDateTime(run.evaluated_at) : <Text type="body" color="secondary">Not yet</Text>}</Pair>
       </MetadataList>
 
@@ -121,15 +135,16 @@ function Pair({ k, children }: { k: string; children: ReactNode }) {
  * every reported gate passed and nothing required went unassessed; an empty
  * findings list alone is never treated as a pass.
  */
-export function Verdict({ run, stale }: { run: ValidationRun; stale: boolean }) {
+export function Verdict({ run, stale }: { run: ValidationRun; stale: boolean }): ReactElement {
   const unassessed = unassessedMandatory(run);
+  const what = KIND_WORD[run.input_kind];
   if (isInProgress(run.state)) {
-    return <Alert tone="info" icon="clock" title="Checking the brief">Results appear here when the run finishes. You can leave this page; the run continues.</Alert>;
+    return <Alert tone="info" icon="clock" title={`Checking the ${what}`}>Results appear here when the run finishes. You can leave this page; the run continues.</Alert>;
   }
   if (run.state === 'FAILED' || run.state === 'CANCELLED') {
     return (
       <Alert tone="blocked" title="Validation could not finish">
-        {run.coverage_gaps[0]?.reason ?? 'Nothing was assessed.'} Run validation again; this is not a result about the brief.
+        {run.coverage_gaps[0]?.reason ?? 'Nothing was assessed.'} Run validation again; this is not a result about the {what}.
       </Alert>
     );
   }
@@ -142,7 +157,7 @@ export function Verdict({ run, stale }: { run: ValidationRun; stale: boolean }) 
       )}
       {unassessed.length > 0 && (
         <Alert tone="blocked" title="A required check could not be assessed">
-          {unassessed.map((r) => r.reason ?? `${r.rule_id} could not be assessed.`).join(' ')} The brief cannot move on until it is.
+          {unassessed.map((r) => r.reason ?? `${r.rule_id} could not be assessed.`).join(' ')} The {what} cannot move on until it is.
         </Alert>
       )}
       {!stale && passedAssessedChecks(run) && (
@@ -160,21 +175,41 @@ export function Verdict({ run, stale }: { run: ValidationRun; stale: boolean }) 
 
 /* ---------- Findings ---------- */
 
+/** What a run checked, as a word for sentences. */
+export const KIND_WORD: Record<ValidationRun['input_kind'], string> = { brief: 'brief', text: 'caption', image: 'image' };
+
+type Region = NonNullable<Finding['image_region']>;
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+/**
+ * Where on the picture a finding points, in words. Regions are fractions of
+ * the image's width and height, measured from its top-left corner.
+ */
+export function regionWords(r: Region): string {
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.height / 2;
+  const across = r.width >= 0.7 ? 'across the width' : cx < 1 / 3 ? 'on the left' : cx > 2 / 3 ? 'on the right' : 'in the centre';
+  const down = r.height >= 0.7 ? 'the full height' : cy < 1 / 3 ? 'near the top' : cy > 2 / 3 ? 'near the bottom' : 'in the middle';
+  return `${down[0].toUpperCase()}${down.slice(1)}, ${across}: starts ${pct(r.x)} from the left and ${pct(r.y)} from the top, ${pct(r.width)} wide and ${pct(r.height)} tall.`;
+}
+
 type Filter = 'all' | 'blocking' | 'minor' | 'decision';
 
-export const findingKey = (i: number) => `finding-${i}`;
+export const findingKey = (i: number): string => `finding-${i}`;
 
 /**
  * Findings as in the ComplianceCheck pattern: severity, the rule and its
  * version, the explanation, the quoted text, the suggested correction and the
  * source clause. "Show in text" moves focus to the highlighted words.
  */
-export function FindingsList({ findings, selected, onSelect, canShowInText }: {
+export function FindingsList({ findings, selected, onSelect, canShowInText, ruleOf }: {
   findings: Finding[];
   selected: number | null;
   onSelect: (i: number) => void;
   canShowInText: boolean;
-}) {
+  /** The rule a finding cites, from the active policy, when it is still that version. */
+  ruleOf?: (ruleId: string, ruleVersion: number) => ActiveRule | undefined;
+}): ReactElement {
   const [filter, setFilter] = useState<Filter>('all');
   const indexed = useMemo(
     () => findings.map((f, i) => ({ f, i })).sort((a, b) => SEVERITY_ORDER.indexOf(a.f.severity) - SEVERITY_ORDER.indexOf(b.f.severity)),
@@ -202,13 +237,14 @@ export function FindingsList({ findings, selected, onSelect, canShowInText }: {
       <List hasDividers aria-label="Findings">
         {shown.map(({ f, i }) => {
           const sev = SEVERITY[f.severity];
+          const rule = ruleOf?.(f.rule_id, f.rule_version);
           return (
             <ListItem key={i} align="start" isSelected={selected === i}
               startContent={<Icon name={sev.icon} color={f.severity === 'minor' ? 'warning' : 'error'} />}
               label={(
                 <HStack gap={2} vAlign="center" wrap="wrap">
                   <Badge variant={sev.variant}>{sev.label}</Badge>
-                  <Text type="supporting" color="secondary">{f.rule_id} v{f.rule_version}</Text>
+                  <Text type="supporting" color="secondary">{f.rule_id} v{f.rule_version}{rule && ` · ${rule.title}`}</Text>
                   {f.needs_human_decision && <Badge variant="regulatory">Needs a decision</Badge>}
                 </HStack>
               )}
@@ -216,9 +252,11 @@ export function FindingsList({ findings, selected, onSelect, canShowInText }: {
               <VStack gap={2}>
                 <Text type="body" wordBreak="break-word">{f.explanation}</Text>
                 {f.offending_excerpt && <Text type="body" color="secondary">Text: <q>{f.offending_excerpt}</q></Text>}
+                {f.image_region && <Text type="body" color="secondary">Area of the image: {regionWords(f.image_region)}</Text>}
                 {f.suggested_correction && <Text type="body" color="secondary">Suggested: {f.suggested_correction}</Text>}
                 <Collapsible trigger={`Source: ${f.source.clause}`} defaultIsOpen={false}>
                   <VStack gap={1}>
+                    {rule && <Text type="body" wordBreak="break-word">Rule: {rule.requirement}</Text>}
                     <Text type="supporting" color="secondary">Source {f.source.source_id}, {f.source.clause}</Text>
                     <Blockquote>{f.source.excerpt ?? 'No excerpt provided.'}</Blockquote>
                   </VStack>
@@ -242,7 +280,7 @@ export function FindingsList({ findings, selected, onSelect, canShowInText }: {
  * are Unicode code points (backend convention). Marks are focusable so
  * "Show in text" can move keyboard and screen-reader focus to them.
  */
-export function EvidenceText({ text, findings, selected }: { text: string; findings: Finding[]; selected: number | null }) {
+export function EvidenceText({ text, findings, selected }: { text: string; findings: Finding[]; selected: number | null }): ReactElement {
   const segments = useMemo(
     () => segmentByCodePoints(text, findings.flatMap((f, i) => (f.text_span ? [{ key: i, span: f.text_span }] : []))),
     [text, findings],

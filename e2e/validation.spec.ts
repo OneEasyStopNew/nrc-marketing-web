@@ -26,7 +26,8 @@ const findings = (page: Page) => page.getByRole('list', { name: 'Findings' }).ge
 async function validateBrief(page: Page, text: string) {
   await brief(page).fill(text);
   await expect(saveStatus(page)).toHaveText(/Saved · version \d+/, { timeout: 10_000 });
-  const version = (await saveStatus(page).textContent())!.match(/version (\d+)/)![1];
+  // The status was just asserted to read "Saved · version N".
+  const version = /version (\d+)/.exec((await saveStatus(page).textContent())!)![1];
   await page.getByRole('button', { name: `Validate version ${version}` }).click();
   await expect(page).toHaveURL(/\/marketing\/validation\/sim-cr-0001\/sim-run-/);
   await expect(seen(page, 'Checking the brief', { exact: true }).first()).toBeVisible();
@@ -45,7 +46,7 @@ test('the seeded PASS opens from the draft and keeps approval separate', async (
   await expect(checks.getByRole('listitem').filter({ hasText: 'Image and media' })).toContainText('Not assessed');
   await expect(checks.getByRole('listitem').filter({ hasText: 'Human approval' })).toContainText('Separate step');
   await expect(seen(page, 'This is not approval; a reviewer still decides.')).toBeVisible();
-  await expect(seen(page, 'sim-policy-2026.11')).toBeVisible();
+  await expect(seen(page, 'Placeholder rules (simulation)')).toBeVisible();
 });
 
 test('a failing brief shows each finding with its rule, source and highlighted words', async ({ page }) => {

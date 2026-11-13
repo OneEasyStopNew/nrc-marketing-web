@@ -22,20 +22,18 @@ export const mockServer = {
   failNextWrite: false,
   /** Set by the simulation tools: how the next validation run fails. */
   nextValidationFailure: null as null | 'timeout' | 'extraction',
-  /** Set by the simulation tools: how the next Generate is answered. */
-  nextGeneration: null as null | 'rejected' | 'unknown' | 'limit' | 'lost',
   /** Create requests already handled: `${tenant}:${Idempotency-Key}` → payload and the draft it made. */
   idempotency: new Map<string, { payload: string; id: string }>(),
 
-  issueToken(userId: string) {
+  issueToken(userId: string): string {
     const token = `sim.${crypto.randomUUID()}`;
     this.tokens.set(token, userId);
     return token;
   },
-  revokeToken(token: string | null) {
+  revokeToken(token: string | null): void {
     if (token) this.tokens.delete(token);
   },
-  userFor(token: string) {
+  userFor(token: string): string | undefined {
     return this.tokens.get(token);
   },
 
@@ -43,12 +41,13 @@ export const mockServer = {
   creatives(seed: MockCreative[]): Map<string, MockCreative> {
     if (!creatives) {
       let stored: MockCreative[] | null = null;
-      try { stored = JSON.parse(sessionStorage.getItem(DRAFTS_KEY) ?? 'null'); } catch { /* start from the seed */ }
+      // Written only by saveCreatives() in this tab (simulation, development only).
+      try { stored = JSON.parse(sessionStorage.getItem(DRAFTS_KEY) ?? 'null') as MockCreative[] | null; } catch { /* start from the seed */ }
       creatives = new Map((stored ?? structuredClone(seed)).map((c) => [c.id, c]));
     }
     return creatives;
   },
-  saveCreatives() {
+  saveCreatives(): void {
     if (!creatives) return;
     try { sessionStorage.setItem(DRAFTS_KEY, JSON.stringify([...creatives.values()])); } catch { /* storage blocked */ }
   },
@@ -57,26 +56,28 @@ export const mockServer = {
   runs(seed: MockValidationRun[]): Map<string, MockValidationRun> {
     if (!runs) {
       let stored: MockValidationRun[] | null = null;
-      try { stored = JSON.parse(sessionStorage.getItem(RUNS_KEY) ?? 'null'); } catch { /* start from the seed */ }
+      // Written only by saveRuns() in this tab (simulation, development only).
+      try { stored = JSON.parse(sessionStorage.getItem(RUNS_KEY) ?? 'null') as MockValidationRun[] | null; } catch { /* start from the seed */ }
       runs = new Map((stored ?? structuredClone(seed)).map((r) => [r.final.validation_run_id, r]));
     }
     return runs;
   },
-  saveRuns() {
+  saveRuns(): void {
     if (!runs) return;
     try { sessionStorage.setItem(RUNS_KEY, JSON.stringify([...runs.values()])); } catch { /* storage blocked */ }
   },
 
-  /** Generation jobs by id, kept across reloads so refresh recovery can be tried. */
+  /** Generation jobs by id, kept across reloads so a reload follows the same job. */
   jobs(): Map<string, MockJob> {
     if (!jobs) {
       let stored: MockJob[] | null = null;
-      try { stored = JSON.parse(sessionStorage.getItem(JOBS_KEY) ?? 'null'); } catch { /* start empty */ }
-      jobs = new Map((stored ?? []).map((j) => [j.final.job_id, j]));
+      // Written only by saveJobs() in this tab (simulation, development only).
+      try { stored = JSON.parse(sessionStorage.getItem(JOBS_KEY) ?? 'null') as MockJob[] | null; } catch { /* start empty */ }
+      jobs = new Map((stored ?? []).map((j) => [j.job_id, j]));
     }
     return jobs;
   },
-  saveJobs() {
+  saveJobs(): void {
     if (!jobs) return;
     try { sessionStorage.setItem(JOBS_KEY, JSON.stringify([...jobs.values()])); } catch { /* storage blocked */ }
   },
@@ -85,13 +86,14 @@ export const mockServer = {
 /** Media, rules, approvals, accounts, publications and team per tenant, seeded from data.ts. */
 export function workspaceFor(tenantId: string, seed: Record<string, MockWorkspace>): MockWorkspace {
   if (!workspaces) {
-    try { workspaces = JSON.parse(sessionStorage.getItem(WORKSPACE_KEY) ?? 'null'); } catch { /* start from the seed */ }
+    // Written only by this module in this tab (simulation, development only).
+    try { workspaces = JSON.parse(sessionStorage.getItem(WORKSPACE_KEY) ?? 'null') as Record<string, MockWorkspace> | null; } catch { /* start from the seed */ }
     workspaces ??= {};
   }
   workspaces[tenantId] ??= structuredClone(seed[tenantId] ?? { media: [], rules: [], approvals: [], accounts: [], publications: [], members: [], activity: [] });
   return workspaces[tenantId];
 }
-export function saveWorkspaces() {
+export function saveWorkspaces(): void {
   if (!workspaces) return;
   try { sessionStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaces)); } catch { /* storage blocked */ }
 }

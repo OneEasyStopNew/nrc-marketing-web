@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { auditLayout, seen, settle, signInAt } from './helpers';
+import { IN_DEVELOPMENT } from '../src/config/inDevelopment';
 
 /**
  * Layout and accessibility audit (axe WCAG 2.1 AA plus the design-system
@@ -47,18 +48,20 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
     await page.locator('li button', { hasText: 'NRC (simulation)' }).click();
     await settle(page);
   } },
-  { name: 'approval-review', open: async (page) => {
+  // One review is not reachable while approvals are in development.
+  ...(IN_DEVELOPMENT.approvals ? [] : [{ name: 'approval-review', open: async (page: Page) => {
     await signInAt(page, '/marketing/approvals/sim-ap-0002', 'reviewer');
     await page.locator('li button', { hasText: 'NRC (simulation)' }).click();
     await settle(page);
-  } },
+  } }]),
   { name: 'publications', open: (page) => signInAt(page, '/marketing/publications', 'publisher') },
-  { name: 'publications-schedule', open: async (page) => {
+  // The schedule dialog is not reachable while publishing is in development.
+  ...(IN_DEVELOPMENT.publications ? [] : [{ name: 'publications-schedule', open: async (page: Page) => {
     await signInAt(page, '/marketing/publications', 'publisher');
     await page.getByRole('button', { name: 'Schedule a post' }).click();
     await page.getByRole('dialog').waitFor();
     await page.waitForTimeout(400);
-  } },
+  } }]),
   { name: 'accounts', open: (page) => signInAt(page, '/marketing/integrations', 'publisher') },
   { name: 'team', open: (page) => signInAt(page, '/marketing/team', 'admin') },
   { name: 'rule-new', open: async (page) => {

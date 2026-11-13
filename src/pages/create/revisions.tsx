@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { Link as AxLink } from '@astryxdesign/core/Link';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { Heading, Text } from '@astryxdesign/core/Text';
@@ -18,6 +18,7 @@ import { Alert, SkeletonRows } from '@/components/ui/Misc';
 import { Modal } from '@/components/ui/Overlay';
 import { diffWords, isUnchanged } from '@/lib/diff';
 import { fmtDateTime } from '@/lib/utils';
+import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
 
 type Version = CreativeVersionPage['items'][number];
@@ -35,7 +36,7 @@ export function VersionHistory({ creative, current, onRestore, readOnly }: {
   current: BriefText;
   onRestore: (v: Version) => void;
   readOnly: boolean;
-}) {
+}): ReactElement {
   const { context } = useSession();
   const q = useInfiniteQuery({
     queryKey: ['creative-versions', context.tenant.tenant_id, creative.id, creative.version],
@@ -71,7 +72,7 @@ export function VersionHistory({ creative, current, onRestore, readOnly }: {
                 )}
                 description={(
                   <VStack gap={1} hAlign="start">
-                    <Text type="supporting" color="secondary">Saved {fmtDateTime(v.created_at)} by {v.created_by}</Text>
+                    <Text type="supporting" color="secondary">Saved {fmtDateTime(v.created_at)} by {v.created_by_name ?? v.created_by}</Text>
                     <Button size="sm" variant="ghost" icon="eye" onClick={() => setCompare(v)}
                       aria-label={`Compare version ${v.version} with the text now`}>Compare with now</Button>
                   </VStack>
@@ -95,10 +96,19 @@ export function VersionHistory({ creative, current, onRestore, readOnly }: {
   );
 }
 
-/** What validation said about one exact version, from CreativeRead.validation_runs. */
+/**
+ * What the brief check said about one exact version: from
+ * CreativeRead.validation_runs when the API lists it, else from a check
+ * started in this tab.
+ */
 function ValidationOf({ creative, version }: { creative: Creative; version: number }) {
-  const run = (creative.validation_runs ?? []).find((r) => r.creative_version === version);
-  if (!run) return <Badge>Not validated</Badge>;
+  const { context } = useSession();
+  const runs = (creative.validation_runs ?? []).filter((r) => r.creative_version === version);
+  const listed = runs.find((r) => r.input_kind === 'brief') ?? runs[0];
+  const known = listed ? undefined : knownRuns(context.tenant.tenant_id, creative.id).find((r) => r.kind === 'brief' && r.version === version);
+  const fetched = useValidationRun(known?.id);
+  const run = listed ?? fetched.data;
+  if (!run) return <Badge>{known && fetched.isPending ? 'Loading' : 'Not validated'}</Badge>;
   if (isInProgress(run.state)) return <Badge variant="brand">Checking</Badge>;
   if (run.state === 'FAILED' || run.state === 'CANCELLED') return <Badge variant="blocked">Check did not finish</Badge>;
   if (run.outcome === 'PASS') return <Badge variant={run.is_current ? 'done' : 'neutral'}>Passed{run.is_current ? '' : ' (old)'}</Badge>;
@@ -169,16 +179,22 @@ function DiffBlock({ label, before, after }: { label: string; before: string; af
  * fix them in place. They describe the version that was checked; after an
  * edit they are a to-do list, not a result.
  */
-export function FindingsToFix({ creative, editing }: { creative: Creative; editing: boolean }) {
+export function FindingsToFix({ creative, editing }: { creative: Creative; editing: boolean }): ReactElement | null {
+  const { context } = useSession();
   const latest = latestValidation(creative);
-  if (!latest || isInProgress(latest.state) || latest.state === 'FAILED' || latest.state === 'CANCELLED' || latest.outcome === 'PASS') return null;
-  return <FindingsToFixList creative={creative} runId={latest.validation_run_id} editing={editing} />;
+  if (latest) {
+    if (isInProgress(latest.state) || latest.state === 'FAILED' || latest.state === 'CANCELLED' || latest.outcome === 'PASS') return null;
+    return <FindingsToFixList creative={creative} runId={latest.validation_run_id} editing={editing} />;
+  }
+  // The API does not list this draft's runs: use the newest text check started in this tab.
+  const known = knownRuns(context.tenant.tenant_id, creative.id).find((r) => r.kind !== 'image');
+  return known ? <FindingsToFixList creative={creative} runId={known.id} editing={editing} /> : null;
 }
 
 function FindingsToFixList({ creative, runId, editing }: { creative: Creative; runId: string; editing: boolean }) {
   const q = useValidationRun(runId);
   const run = q.data;
-  if (!run) return null;
+  if (!run || isInProgress(run.state) || run.state === 'FAILED' || run.state === 'CANCELLED') return null;
   const unassessed = unassessedMandatory(run);
   if (!run.findings.length && !unassessed.length) return null;
   const older = editing || run.creative_version !== creative.version;

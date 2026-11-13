@@ -1,10 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@astryxdesign/core/AppShell';
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav';
 import { TopNav, TopNavHeading } from '@astryxdesign/core/TopNav';
-import { NavIcon } from '@astryxdesign/core/NavIcon';
-import { Layout, LayoutContent, VStack } from '@astryxdesign/core/Layout';
+import { Layout, LayoutContent, LayoutFooter, VStack } from '@astryxdesign/core/Layout';
 import { Text } from '@astryxdesign/core/Text';
 import { Avatar as AxAvatar } from '@astryxdesign/core/Avatar';
 import {
@@ -14,7 +13,9 @@ import { SIMULATION_BUILD } from '@/config/env';
 import { HOME_ITEM, NAV, titleFor } from '@/config/nav';
 import { useAuth, useSession } from '@/auth/AuthProvider';
 import { useTheme } from '@/context/ThemeContext';
-import { Icon, iconComponent } from '@/components/ui/Icon';
+import { iconComponent } from '@/components/ui/Icon';
+import nrcLogo from '@/assets/nrc-logo.png';
+import nrcLogoDark from '@/assets/nrc-logo-dark.png';
 import { useToast } from '@/components/ui/Toast';
 import type { MarketingContext } from '@/api/session';
 
@@ -28,15 +29,16 @@ export const ROLE_LABELS: Record<MarketingContext['roles'][number], string> = {
  * the page. Menu visibility is usability only; every route checks the
  * capability too, and the API checks every request.
  */
-export function AppLayout({ children }: { children: ReactNode }) {
+export function AppLayout({ children }: { children: ReactNode }): ReactElement {
   const { signOut, switchTenant, chooseTenant, can, simulation } = useAuth();
   const { me, context } = useSession();
-  const { theme, setTheme } = useTheme();
+  const { theme, resolved, setTheme } = useTheme();
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
   const lastPath = useRef(location.pathname);
   const items = NAV.filter((i) => can(i.capability));
+  const [year] = useState(() => new Date().getFullYear());
   const roles = context.roles.map((r) => ROLE_LABELS[r]).join(', ') || 'No role';
 
   useEffect(() => { document.title = `${titleFor(location.pathname) || 'Marketing'} · NRC Marketing`; }, [location.pathname]);
@@ -104,16 +106,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <AppShell
-        height="auto"
-        variant="surface"
-                topNav={(
+        // Section: Astryx dividers between the navigation and the page, on one background (no raised panel).
+        variant="section"
+        topNav={(
           <TopNav
             label="Top"
             heading={(
               <TopNavHeading
                 heading="NRC Connect · Marketing"
                 headingHref={HOME_ITEM.href}
-                logo={<NavIcon icon={<Icon name="mega" size={20} />} />}
+                // National Research Centers logo, as supplied (not in a circle). The dark-theme copy has white lettering.
+                // alt is empty: the heading next to it already names the link.
+                logo={<img src={resolved === 'dark' ? nrcLogoDark : nrcLogo} alt="" height={36} width={80} />}
               />
             )}
             startContent={orgSwitcher}
@@ -135,19 +139,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
             )}
           </SideNav>
         )}>
+        {/* Fill height: the page scrolls inside the content area and the footer stays at the bottom of the screen. */}
         <Layout
-          height="auto"
-          contentWidth={1280}
           content={(
             <LayoutContent padding={0}>
               {/* Padding sits on the stack, not on LayoutContent: Table bleeds past LayoutContent padding (as in the Astryx table template). */}
-              <VStack gap={10} padding={6}>
-                <VStack key={location.pathname} gap={8}>{children}</VStack>
+              <VStack key={location.pathname} gap={8} padding={6}>{children}</VStack>
+            </LayoutContent>
+          )}
+          footer={(
+            <LayoutFooter hasDivider padding={0}>
+              {/* Same side padding as the page above, so the line starts where the content starts. */}
+              <VStack paddingInline={6} paddingBlock={3}>
                 <Text type="supporting" color="secondary">
-                  © {new Date().getFullYear()} National Research Centers · NRC Connect by Octavo Lab AI Technology Solutions
+                  © {year} National Research Centers · NRC Connect by Octavo Lab AI Technology Solutions
                 </Text>
               </VStack>
-            </LayoutContent>
+            </LayoutFooter>
           )}
         />
       </AppShell>

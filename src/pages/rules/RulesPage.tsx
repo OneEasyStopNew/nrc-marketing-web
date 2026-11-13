@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
@@ -23,7 +23,8 @@ import { Drawer, Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { fmtDateTime } from '@/lib/utils';
 import { useRules, useWorkspaceMutation } from '@/pages/shared/queries';
-import { GATE_LABEL, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { GATE_LABEL, InDevelopmentDialog, QueryState, RuleStatusBadge, SeverityBadge, useIsSimulation } from '@/pages/shared/ui';
 
 const GATES: RuleGate[] = ['completeness', 'study_facts', 'policy', 'media'];
 const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
@@ -35,7 +36,7 @@ const APPLIES: { value: PolicyRule['applies_to'][number]; label: string }[] = [
  * against, each traced to the clause it comes from. Policy administrators
  * draft and edit rules; a draft applies only once activated.
  */
-export default function RulesPage() {
+export default function RulesPage(): ReactElement {
   const { can } = useAuth();
   const rules = useRules();
   const [status, setStatus] = useState<RuleStatus>('ACTIVE');
@@ -43,7 +44,7 @@ export default function RulesPage() {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<PolicyRule | 'new' | null>(null);
-  const all = rules.data ?? [];
+  const all = useMemo(() => rules.data ?? [], [rules.data]);
   const count = (s: RuleStatus) => all.filter((r) => r.status === s).length;
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,7 +79,10 @@ export default function RulesPage() {
         </QueryState>
       </VStack>
       {open && <RuleDrawer rule={open} manage={manage} onClose={() => setOpenId(null)} onEdit={() => setEditing(open)} />}
-      {editing && <RuleDialog rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {/* NRC-20: the demo is read-only; editing rules is in development (config/inDevelopment.ts). */}
+      {editing && (IN_DEVELOPMENT.ruleEditing
+        ? <InDevelopmentDialog feature={editing === 'new' ? 'New rule' : `Edit ${editing.rule_id}`} description="Adding and editing rules is being built and will be available soon." onClose={() => setEditing(null)} />
+        : <RuleDialog rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />)}
     </VStack>
   );
 }
@@ -144,7 +148,11 @@ function RuleDrawer({ rule: r, manage, onClose, onEdit }: { rule: PolicyRule; ma
           <Blockquote>{r.source.excerpt}</Blockquote>
         </VStack>
       </VStack>
-      <AlertDialog isOpen={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}
+      {confirm && IN_DEVELOPMENT.ruleEditing && (
+        <InDevelopmentDialog feature={confirm === 'ACTIVE' ? `Activate ${r.rule_id}` : `Retire ${r.rule_id}`}
+          description="Activating and retiring rules is being built and will be available soon." onClose={() => setConfirm(null)} />
+      )}
+      <AlertDialog isOpen={!!confirm && !IN_DEVELOPMENT.ruleEditing} onOpenChange={(o) => !o && setConfirm(null)}
         title={confirm === 'ACTIVE' ? `Activate ${r.rule_id}?` : `Retire ${r.rule_id}?`}
         description={confirm === 'ACTIVE' ? 'New validation runs will check posts against it. Results already given are not changed.' : 'New validation runs stop using it. Its history stays.'}
         actionLabel={confirm === 'ACTIVE' ? 'Activate' : 'Retire'} actionVariant={confirm === 'ACTIVE' ? 'primary' : 'destructive'}

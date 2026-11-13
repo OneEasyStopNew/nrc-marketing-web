@@ -1,21 +1,21 @@
 # Session contract: sign-in, `/me`, `/context`
 
 Status: **backend contract published by Dinesh (NRC-1 / NRC-2), 9 November 2026.**
-The source of truth is `contracts/openapi.json` in `OneEasyStopNew/nrc-marketing-api` (commit `2c65c7e`); `src/api/schema.d.ts` is generated from it. This page records what the frontend relies on. Paths are relative to `/v1/marketing`.
+The source of truth is `contracts/openapi.json` in `OneEasyStopNew/nrc-marketing-api` (commit `2c65c7e`); `src/api/schemas.gen.ts` is generated from it (`npm run gen:api`), and every response is checked against those schemas at runtime. This page records what the frontend relies on. Paths are relative to `/v1/marketing`.
 
-## Identity (Cognito, owned by Bhushan)
+## Identity (Cognito, owned by Prabhu)
 
 | Item | Value |
 |---|---|
 | Flow | Managed login, authorization code + PKCE, public app client (no secret) |
 | Callback / sign-out URLs | `<origin>/auth/callback`, `<origin>/signed-out` (localhost:5173 plus the staging web URL) |
-| Scopes | `openid email profile marketing/api` (`marketing/api` to be confirmed by Bhushan) |
+| Scopes | `openid email profile marketing/api` (`marketing/api` to be confirmed by Prabhu) |
 | Token sent to the API | **Access token** as `Authorization: Bearer …`. ID tokens are rejected |
 | Name and email | From the **ID token**; the access token carries neither |
 | Lifetime | Set on the app client (Cognito default: 1 hour). Revoking the refresh token on sign-out does not end the current access token |
 | Disabled account, MFA required | Stopped by Cognito at sign-in; arrive as a callback error, never from the API |
 
-Pending: user pool ID, app client ID, Hosted UI domain and test accounts (Bhushan); staging URL (Prabhu).
+Pending from Prabhu: user pool ID, app client ID, Hosted UI domain, test accounts and the staging URL.
 
 ## Tenant
 

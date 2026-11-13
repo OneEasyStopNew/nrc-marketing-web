@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { useAuth } from '@/auth/AuthProvider';
 import type { Me } from '@/api/session';
 import { Button } from '@/components/ui/Button';
@@ -8,7 +9,7 @@ import { Icon } from '@/components/ui/Icon';
 import { AuthFrame } from './AuthFrame';
 
 /** Explicit organisation choice when the account belongs to more than one. */
-export default function ChooseTenant({ me, notice }: { me: Me; notice?: string }) {
+export default function ChooseTenant({ me, notice }: { me: Me; notice?: string }): ReactElement {
   const { chooseTenant, signOut, mode } = useAuth();
   return (
     <AuthFrame title="Choose an organisation" simulation={mode === 'simulation'}>

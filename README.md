@@ -6,12 +6,21 @@ React 18 + TypeScript + Vite frontend for the NRC Marketing module (HLD v1.1: Re
 
 ```bash
 npm install
-cp .env.example .env.local   # VITE_AUTH_MODE=simulation for local work
+cp .env.example .env   # VITE_AUTH_MODE=simulation for local work
 npm run dev                  # http://localhost:5173
-npm run typecheck
+npm run typecheck            # app, build config and browser tests
+npm run lint                 # ESLint, type-aware (eslint.config.js)
+npm run format               # Prettier (CI check follows the one-time reformat)
 npm test                     # unit tests (vitest)
-npm run test:e2e             # browser tests (Playwright, simulation mode, 3 widths + dark)
+npm run test:e2e             # browser tests (Playwright, simulation mode, 3 widths + dark); not in CI, see below
 npm run build                # production build into dist/
+npm run check:build          # scans dist/ for source maps, simulation code, dummy data and secrets
+npm run gen:api              # regenerates src/api/schemas.gen.ts from src/api/openapi.json
+
+CI (`.github/workflows/web-ci.yml`) runs audit, lint, typecheck, unit tests, build and the
+build check on every pull request. Every API response is checked against the generated zod schemas; a
+response that does not match fails as `CONTRACT_MISMATCH`. Installs only take package versions that are
+at least 7 days old (`.npmrc`).
 ```
 
 ## Sign-in and session (OR-102)
@@ -33,7 +42,8 @@ Contract with the backend: [docs/contracts/session.md](docs/contracts/session.md
 - **Versioned saves.** Autosave runs about 1.5 s after typing stops, one request at a time, always with `If-Match`. The status shows unsaved, saving, saved with the version number, or failed. A failed save keeps the text and retries once automatically.
 - **Conflicts (412)** open a side-by-side comparison: use their version, save mine as the next version, or copy my text. Nothing is overwritten silently.
 - **Leaving with unsaved work** asks first, for in-app links and the back button (`useBlocker`, which needs the data router in `main.tsx`) and for tab close or reload.
-- **Readiness** shows the backend's validation state and generation eligibility for the current version. Any edit marks the last result out of date immediately.
+- **Readiness** shows the brief, caption and image checks and the backend's generation eligibility for the current version. Any edit marks the last result out of date immediately.
+- **Image** is generated only when `GET /creatives/{id}/generation-eligibility` allows it for the current version. The job is followed until it ends; a reload follows the same job and never starts another.
 - **Limits count Unicode characters**, so Spanish, other scripts and emoji are counted the way people count them.
 
 Contract proposal: [docs/contracts/creatives.md](docs/contracts/creatives.md).
@@ -56,6 +66,31 @@ The fake API replaces `fetch` inside `src/api/http.ts`. Pages call the same `src
 To add dummy data for a new endpoint, add its type to `MockData` in `types.ts`, the data to your local `data.ts`, then one entry to `ROUTES` in `api.ts`. On a fresh clone, create `src/mocks/data.ts` that exports `TENANTS` and `USERS` matching `types.ts`; the browser tests need it. Values must be visibly fake. Never add real study facts, people or patient data.
 
 The dummy users are a creator, a reviewer with two organisations, an administrator, a user with no access, a disabled account and a user missing MFA. The account menu adds *Expire access token* and *End session* for testing the refresh and expiry paths. A production build refuses simulation mode unless `VITE_ALLOW_SIMULATION=true`. Simulation results never count as live evidence.
+
+### Development against the real API (`devtoken`)
+
+Until Cognito is set up, the backend accepts a local development token. `VITE_AUTH_MODE=devtoken` runs the real screens against the real Marketing API in `npm run dev`:
+
+```
+# .env (git-ignored)
+VITE_AUTH_MODE=devtoken
+DEV_API_TARGET=http://<host>:8001      # where the Marketing API runs, without a path
+DEV_API_TOKEN=<development access token from the backend, lasts up to 24 hours>
+```
+
+- The Vite dev server forwards `/v1/...` to `DEV_API_TARGET` and adds the token there (`vite.config.ts`). The browser never holds the token and sends no `Authorization` header; the two `DEV_` names cannot reach a bundle because they do not start with `VITE_`.
+- The mode exists only in `npm run dev`. A build refuses it, and `npm run check:build` fails if its code or any token is in `dist/`.
+- When calls start answering 401, the token has expired: put a new one in `.env` and restart `npm run dev`.
+- The browser tests always run in simulation mode, whatever `.env` says.
+- `npm run dev:sim` starts a second dev server on port 5174 that is always in simulation mode, so the dummy sign-ins for every role stay one command away while `npm run dev` talks to the real API.
+
+What the screens do where the demo API does not fill a field yet:
+
+| API today | The screen |
+|---|---|
+| `CreativeRead.validation_runs` is always empty | Remembers the runs started in this tab (ids only, `sessionStorage`) and reads them back; the brief's state also comes from `generation-eligibility` |
+| `CreativeRead.asset_id` stays null after generation | Finds the image of the current version from the job, then from `GET /creatives/{id}/export` |
+| No `GET /creatives` (answers 405) | Draft lists say "not available yet"; a draft opens from its link |
 
 ## Design
 

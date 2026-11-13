@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { VStack } from '@astryxdesign/core/Layout';
-import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import { creativesApi, type Versioned } from '@/api/creatives';
@@ -11,16 +11,17 @@ import { Card, CardHead } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Form';
 import { Alert, EmptyState, List, ListItem, PageHeader, SkeletonRows } from '@/components/ui/Misc';
 import { fmtDateTime } from '@/lib/utils';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment } from '@/pages/shared/ui';
 import { Composer } from './Composer';
 import FinalPreview from './FinalPreview';
 
 /** /marketing/create (new brief), /marketing/create/:creativeId (existing draft) and .../preview (final preview). */
-export default function CreatePage() {
+export default function CreatePage(): ReactElement {
   return (
     <Routes>
       <Route index element={<NewBrief />} />
       <Route path=":creativeId" element={<ExistingDraft />} />
-      <Route path=":creativeId/generation/:jobId" element={<ExistingDraft />} />
       <Route path=":creativeId/preview" element={<FinalPreview />} />
     </Routes>
   );
@@ -81,7 +82,6 @@ function NewBrief() {
 function ExistingDraft() {
   const { creativeId = '' } = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
   const { context } = useSession();
   const handed = (location.state as { versioned?: Versioned } | null)?.versioned;
   const fromCreate = handed?.creative.id === creativeId ? handed : undefined;
@@ -105,7 +105,7 @@ function ExistingDraft() {
             {notFound ? (
               <EmptyState icon="search" title="Draft not found"
                 description="It does not exist, or it is not available to you in this organisation."
-                action={<Button variant="secondary" size="sm" onClick={() => navigate('/marketing/create')}>Back to Create post</Button>} />
+                action={<Button variant="secondary" size="sm" href="/marketing/create">Back to Create post</Button>} />
             ) : (
               <>
                 <Alert tone="blocked" title="The draft could not be loaded"
@@ -122,7 +122,7 @@ function ExistingDraft() {
   }
 
   const study = context.studies.find((s) => s.study_id === loaded.creative.study_id) ?? null;
-  const readOnly = !study || study.recruitment_status !== 'recruiting';
+  const readOnly = study?.recruitment_status !== 'recruiting';
   const reason = !study
     ? 'The study for this draft is no longer available to you. The draft is shown as read-only history.'
     : `${study.study_title} is closed. This draft is read-only history and cannot be used for new posts.`;
@@ -147,12 +147,22 @@ function Page({ children, crumbs }: { children: React.ReactNode; crumbs?: boolea
 
 function DraftList() {
   const { context } = useSession();
-  const navigate = useNavigate();
   const q = useQuery({
     queryKey: ['creatives', context.tenant.tenant_id],
     queryFn: ({ signal }) => creativesApi.list(signal),
+    // The backend has no draft list yet (config/inDevelopment.ts): do not call it.
+    enabled: !IN_DEVELOPMENT.draftList,
   });
   const studyName = (id: string) => context.studies.find((s) => s.study_id === id)?.study_title ?? 'Study not available';
+
+  if (IN_DEVELOPMENT.draftList) {
+    return (
+      <Card>
+        <CardHead title="Your drafts" />
+        <InDevelopment feature="Your drafts" description="The list of your drafts is being built and will be available soon. Open a draft from its link or from a validation result." />
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -170,11 +180,11 @@ function DraftList() {
           </Alert>
         </>
       )}
-      {q.data && q.data.length === 0 && <EmptyState icon="edit" title="No drafts yet" description="Drafts you create appear here." />}
+      {q.data?.length === 0 && <EmptyState icon="edit" title="No drafts yet" description="Drafts you create appear here." />}
       {q.data && q.data.length > 0 && (
         <List>
           {q.data.map((d) => (
-            <ListItem key={d.id} chevron onClick={() => navigate(`/marketing/create/${encodeURIComponent(d.id)}`)}
+            <ListItem key={d.id} chevron href={`/marketing/create/${encodeURIComponent(d.id)}`}
               title={d.prompt_preview || 'Empty brief'}
               sub={`${studyName(d.study_id)} · version ${d.version} · ${fmtDateTime(d.updated_at)}`} />
           ))}

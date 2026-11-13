@@ -1,8 +1,8 @@
 # Image generation, jobs and generated images (NRC-6, NRC-3, NRC-10, NRC-21)
 
-What the backend provides for generation, what the web app already does with it (NRC-21, this PR), and what the rest of the UI needs to know. Owner: Firoz. Backend PRs: nrc-marketing-api #1 (jobs), #2 (storage), #3 (Higgsfield), #5 (feed size).
+What the backend provides for generation, what the web app does with it, and what the rest of the UI needs to know. Owner: Firoz (NRC-21). Backend PRs: nrc-marketing-api #1 (jobs), #2 (storage), #3 (Higgsfield), #5 (feed size), #7 (eligibility).
 
-**In short: you don't need to integrate anything new.** The Generate flow is built in this PR on top of `feature/NRC-marketing-ui`. Your code already reads images (`src/api/assets.ts`). The sections below are for review, and for the screens that show job or image state.
+The Generate flow on `main` (Praneeth's `GenerationStep` and `useGeneration`) is the base. NRC-21 (PR #2) hardens it: response checks, timeouts, UUID ids, backend terminal states, progress by known steps, every refusal code, and an always-mounted status region.
 
 ## 1. Endpoints
 
@@ -24,7 +24,8 @@ All of them are under `/v1/marketing`. They need `Authorization: Bearer`, `X-Ten
   - `UNKNOWN`: the provider may have accepted the job but didn't confirm. The backend reconciles it with the same provider key. **Never offer a new paid attempt while a job is UNKNOWN.**
   - `NEEDS_REVIEW`: an operator decides.
   - `CANCEL_REQUESTED`: reserved; there's no cancel endpoint in the demo.
-- **`stage`** (becomes the `JobStage` enum when the backend PRs merge): `submitting`, `retry_wait`, `reconcile`, `waiting_provider`, `output_ready`, `fetching_output`, `stored`. Show progress from these. There's no time estimate, because the provider gives none.
+- **`stage`** (the backend's `JobStage`, still a plain string in the contract): `submitting`, `retry_wait`, `reconcile`, `waiting_provider`, `output_ready`, `fetching_output`, `stored`. Show progress from these. There's no time estimate, because the provider gives none. A stage the web app doesn't know keeps the state's own step.
+- **Finished states** are only `SUCCEEDED`, `FAILED` and `CANCELLED` (the backend's `TERMINAL_STATES`). `UNKNOWN` and `NEEDS_REVIEW` can still be settled, so the web app keeps reading them slowly (every 15 s) with Generate off.
 - **`failure_code`** when `FAILED`:
   - `content_rejected`: the provider refused the brief;
   - `provider_failed`: not charged;
@@ -38,39 +39,32 @@ All of them are under `/v1/marketing`. They need `Authorization: Bearer`, `X-Ten
 
 | Status and code | Meaning | UI (already done in NRC-21) |
 |---|---|---|
-| 409 `VALIDATION_NOT_PASSED` | This version hasn't passed validation | "Validate this version" |
-| 412 `VERSION_CONFLICT`, `details.current_version` | A newer version exists | Reload, validate, then generate |
-| 409 `GENERATION_NOT_ELIGIBLE`, `details.reason` | `STUDY_CLOSED`, `LANGUAGE_NOT_ALLOWED`, `FORMAT_NOT_ALLOWED`. With Dinesh's NRC-7 also `STALE_VERSION`, `NOT_VALIDATED`, `NO_ACTIVE_POLICY` | One message per reason |
+| 409 `VALIDATION_NOT_PASSED` or 409 `GENERATION_NOT_ELIGIBLE` | This version may not be generated; the server's `message` says why | The server's message; eligibility is read again |
+| 412 `VERSION_CONFLICT`, `details.current_version` | A newer version exists | Reload, validate, then generate; eligibility is read again |
 | 429 `GENERATION_LIMIT_REACHED`, `details.reason` | `ACTIVE_JOB_LIMIT` (2 running per organisation; try later) or `CREDIT_CEILING` (today's allowance used) | Distinct messages; only the first offers "Try again" |
 | 409 `CONFLICT` | The same command is still being set up | Wait, then try again with the same key |
 | 403 | The role lacks `generation:run` | Permission answer |
-| 503 or a network error | Temporary | "Try again" with the **same** key |
+| 503, a network error or a timeout (15 s) | Temporary, or the answer was lost | "Generate again" resends the **same** key |
+| 202 whose body can't be read | The job may exist | Same key on the next Generate |
 
 `GET /assets/{id}` can return **503 `STORAGE_UNAVAILABLE`**. Show it as temporary ("try again"), not as "not found".
 
-## 4. What NRC-21 adds to the web app (this PR)
+## 4. What the web app does (main plus NRC-21)
 
 | File | Contents |
 |---|---|
-| `src/api/jobs.ts` | `jobsApi.start` / `jobsApi.get`, `JOB_STAGES`, which mirror the backend's `JobStage` until the generated type exists, `jobProgress` (state and stage to step), `failureText`, `isJobTerminal`. Every answer is checked by `parseJob` / `parseJobAccepted`: a state this build doesn't know shows as `UNKNOWN` ("Being confirmed"), and a body that breaks the contract is an error, not a crash. Job ids must be UUIDs before they go into a path (a malformed id in the address reads as "not available", with no request). Each request times out after 15 s; a timeout counts as a lost answer, so "Try again" resends the same Idempotency-Key |
-| `src/pages/create/useGeneration.ts` | `useJob` (polling with backoff and jitter, 15 s while UNKNOWN or NEEDS_REVIEW, stops 30 minutes after `created_at` and offers "Check again"), `useStartGeneration` (one key per command, reused after a lost or temporary failure), `startProblem` (error to copy), `generationSummary`, `jobPath` |
-| `src/pages/create/generation.tsx` | `GenerationStatus`: the step 4 panel (progress, failed, unconfirmed, review, saved image with provenance). One screen-reader status region stays mounted for the panel's life and says where the job is or why it could not start |
-| `src/pages/create/parts.tsx` | `ReadinessCard` gains the Generation row and the **Generate image** button. It's enabled only for a saved version whose current validation passed, with `generation:run`, and no job running or unconfirmed. Generate becomes the primary button once validation has passed |
-| `src/pages/create/Composer.tsx`, `CreatePage.tsx` | Wiring, and the route `/marketing/create/:creativeId/generation/:jobId`. The job id is in the **path** because sign-in keeps only the path, so a reload finds the same job |
-| `src/mocks/api.ts`, `server.ts`, `types.ts` | Simulation: `POST /creative-jobs` and `GET /jobs/:id` follow the backend's states and codes. Simulated job ids are UUIDs like the backend's. Jobs persist in sessionStorage. The Simulation tools card can make the next image be refused, stay unconfirmed, hit the daily limit or lose its answer |
-| `e2e/generation.spec.ts` | Progress and reload recovery, double click (1 job), lost answer (same job), refused, unconfirmed, limit, edited brief |
-| `e2e/create.spec.ts` | One assertion updated: Generate is now offered for a passed version, and turned off after an edit |
+| `src/api/jobs.ts` | `jobsApi.startImage` / `jobsApi.get` on the generated schemas. On top of `S.JobRead`/`S.JobAccepted`: `job_id` must be a UUID, and a state this build doesn't know reads as `UNKNOWN`. `get` refuses a non-UUID id as not found, without a request. Each request times out after 15 s; a timeout counts as a lost answer. Also `JOB_STAGES`, `jobProgress` (state and stage to a known step), `failureText` (known `failure_code` first, then the server's `failure_message`), `isJobDone` (backend terminal states), `isJobUnsettled`, `jobKeys` |
+| `src/pages/create/generationRules.ts` | Pure rules: `startProblem` (every code `POST /creative-jobs` returns, and whether the next Generate resends the same key), `commandFor`/`commandAfterProblem`, `jobPollDelay` (backoff while running, 15 s while unsettled, stop when done or 30 minutes after `created_at`), `generationAnnouncement` |
+| `src/pages/create/useDraftChecks.ts` | `useGeneration`: the job id is kept per tab in sessionStorage (only a UUID is accepted back), so a reload follows the same job. A synchronous guard stops a double click; the start is aborted when the page goes away; refusals are toasts. Returns `active`, `unsettled`, `pollingStopped` and `checkAgain` |
+| `src/pages/create/Generation.tsx` | `GenerationStep`: progress by known steps, the failed, unconfirmed, review and cancelled states, "Check again" after the polling window, the saved image with provenance and "still needs its final validation". One screen-reader status region stays mounted for the step's life |
+| `src/mocks/api.ts` | Simulated job ids are UUIDs like the API's |
+| Tests | `src/api/jobs.test.ts`, `src/pages/create/generationRules.test.ts`, `useDraftChecks.generation.test.tsx` (hook, MSW), `Generation.test.tsx` (component), `e2e/generation.spec.ts` (double click makes one job; a tampered job reference is ignored) |
 
-## 5. What you need to do or know
+## 5. What you need to know
 
-1. **Review this PR.** It's stacked on your branch and targets `feature/NRC-marketing-ui`.
-2. **Final preview and export:** your preview reads `creative.asset_id`. The backend is changing so that `CreativeRead.asset_id` returns the newest generated image for the **current** version, and is empty after an edit. No change on your side. `GET /creatives/{id}/export` still returns 501 in the backend; that's Dinesh's.
-3. **After the backend PRs merge:** regenerate `src/api/schema.d.ts`. `JobRead.stage` becomes the `JobStage` enum, so `JOB_STAGES` in `src/api/jobs.ts` can switch to the generated type.
-4. **Your simulated validation conflict:** `POST /validations` returns 409 `VERSION_CONFLICT` in `src/mocks/api.ts`. The backend returns **412** for a stale version, so please align it.
-5. **`docs/contracts/workspace.md`** still describes `application/problem+json` with `errors[]`. The agreed body is `{code, message, request_id, details, retryable}`.
-6. **Known gap:** Generate's busy check only knows the job in the address. A second tab, or opening the draft without the job id, can start another job. The backend caps running jobs per organisation (2), so it's bounded, not prevented. A later fix needs an API for "the draft's active job".
-7. **NRC-18 and NRC-20:** your Media and Rules pages overlap my tickets. Let's agree who finishes which. The demo needs a read-only rules view, and media upload needs an upload API that isn't built yet.
-8. **Real API:** the web app's Cognito mode needs Prabhu's pool, with the `marketing/api` scope and the callbacks `/auth/callback` and `/signed-out` registered for `http://localhost:5173` and the staging URL. The API also needs `CORS_ORIGINS` to include the web origin. Already in place: the API allows `Authorization`, `Idempotency-Key`, `If-Match` and `X-Tenant-Id`, and exposes `Location` and `ETag`.
+1. **Busy check per tab:** the stored job is per browser tab, so a second tab can start another job. The backend caps running jobs per organisation (2), so it's bounded, not prevented. A later fix needs an API for "the draft's active job".
+2. **After the contract types `stage` as `JobStage`:** regenerate the schemas (`npm run gen:api`) and switch `JOB_STAGES` to the generated type.
+3. **Not in the demo:** cancel, video, model and cost choices, and the final-image validation result.
 
 ## 6. Things the backend guarantees, so the UI doesn't need to
 
