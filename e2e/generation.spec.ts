@@ -19,6 +19,13 @@ test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
 const SEEDED = '/marketing/create/sim-cr-0001';
 const brief = (page: Page) => page.getByRole('textbox', { name: /^Brief/ });
 const generate = (page: Page) => page.getByRole('button', { name: /^Generate (image|a new image)$/ });
+/**
+ * The preview image is lazy (NRC-18): the browser loads it only near the viewport, and its
+ * checksum line appears once it has loaded. Bring it into view, as a person would, before
+ * checking it; on small screens the Generate button leaves the Preview off-screen.
+ */
+const viewPreviewImage = (page: Page) =>
+  page.getByRole('img', { name: /^Generated image for the brief/ }).first().scrollIntoViewIfNeeded();
 
 test('a new draft cannot be generated until its brief passes', async ({ page }) => {
   await signInAt(page, '/marketing/create', 'creator');
@@ -93,6 +100,7 @@ const jobChecksums = (page: Page) =>
 test('a new image replaces the earlier one as soon as it is ready, without a reload', async ({ page }) => {
   // The seeded draft already names an image, as any draft with an earlier generation does.
   await signInAt(page, SEEDED, 'creator');
+  await viewPreviewImage(page);
   const shownChecksum = seen(page, /Checksum [0-9a-f]{12}/).first();
   await expect(shownChecksum).toBeVisible();
   const before = await shownChecksum.textContent();
@@ -101,6 +109,8 @@ test('a new image replaces the earlier one as soon as it is ready, without a rel
   await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
   await expect.poll(() => jobChecksums(page)).toHaveLength(1);
   const [made] = await jobChecksums(page);
+  await expect(seen(page, 'Generating a new image…')).toHaveCount(0, { timeout: 15_000 });
+  await viewPreviewImage(page);
   // The picture looks the same in simulation; the preview's checksum says which image it is.
   await expect(seen(page, new RegExp(`Checksum ${made}`)).first()).toBeVisible({ timeout: 15_000 });
   expect(before).not.toContain(made);
@@ -141,9 +151,14 @@ test('the Preview shows a busy placeholder in the image frame while a first imag
   await expect(label).toBeVisible();
   await expect(empty).toHaveCount(0);
   await expect(page.locator('[aria-busy="true"]').filter({ has: label })).toHaveCount(1);
-  // Same frame as the empty one: the card does not change height.
-  expect(await label.evaluate((el) => el.closest('[data-card]')?.getBoundingClientRect().height ?? 0)).toBeCloseTo(frameHeight, 0);
+  // Same frame as the empty one: the card does not change height. Read in one step while the
+  // frame is busy; a fast simulated job can end between two separate calls.
+  await page.waitForFunction((h) => {
+    const card = document.querySelector('[aria-busy="true"]')?.closest('[data-card]');
+    return !!card && Math.abs(card.getBoundingClientRect().height - h) < 0.5;
+  }, frameHeight);
   await expect(label).toHaveCount(0, { timeout: 15_000 });
+  await viewPreviewImage(page);
   await expect(page.getByRole('img', { name: /^Generated image for the brief/ }).first()).toBeVisible();
 });
 
