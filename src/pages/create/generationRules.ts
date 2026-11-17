@@ -1,5 +1,5 @@
 import type { ApiError } from '@/api/errors';
-import { isJobDone, isJobUnsettled, jobProgress, type Job } from '@/api/jobs';
+import { isJobDone, isJobUnsettled, jobProgress, stepText, type Job, type JobState } from '@/api/jobs';
 import { pollDelay } from '@/pages/validation/useValidation';
 
 /**
@@ -50,6 +50,20 @@ export function generationAnnouncement({
   if (!job) return '';
   if (pollingStopped) return 'Automatic checking has stopped';
   return `Image generation: ${jobProgress(job).label}`;
+}
+
+/** States in which the image is still being made. */
+const MAKING: readonly JobState[] = ['QUEUED', 'RUNNING', 'WAITING_PROVIDER'];
+
+/**
+ * The step the Preview's placeholder shows while an image is being made, or null
+ * when nothing is. End states and the waiting ones (UNKNOWN, NEEDS_REVIEW,
+ * CANCEL_REQUESTED) give null: the generation step shows their own message.
+ */
+export function generatingStep({ job, starting }: { job: Pick<Job, 'state' | 'stage'> | undefined; starting: boolean }): string | null {
+  if (starting) return 'Starting';
+  if (!job || !MAKING.includes(job.state)) return null;
+  return stepText(jobProgress(job));
 }
 
 /** Why Generate could not start, and whether pressing it again resends the same command. */

@@ -6,7 +6,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { isPlaceholderImage, type Asset } from '@/api/assets';
 import type { Creative, GenerationEligibility } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
-import { failureText, JOB_STEPS, jobProgress, type Job } from '@/api/jobs';
+import { failureText, JOB_STEPS, jobProgress, stepText, type Job } from '@/api/jobs';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Alert, ProgressBar } from '@/components/ui/Misc';
@@ -78,7 +78,7 @@ export function GenerationStep({ creative, editing, canGenerate, eligibility, jo
       {active && progress && (
         <VStack gap={2}>
           <ProgressBar value={progress.step} max={JOB_STEPS.length - 1} label={progress.label}
-            valueLabel={`Step ${progress.step + 1} of ${JOB_STEPS.length}`} ariaLabel="Image generation progress" />
+            valueLabel={stepText(progress)} ariaLabel="Image generation progress" />
           <Text type="supporting" color="secondary">You can keep this page open or come back; the job continues.</Text>
         </VStack>
       )}

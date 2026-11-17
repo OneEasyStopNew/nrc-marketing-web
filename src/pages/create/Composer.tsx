@@ -27,6 +27,7 @@ import {
 import { useDraftEditor } from './useDraftEditor';
 import { FindingsToFix, VersionHistory } from './revisions';
 import { GenerationStep } from './Generation';
+import { generatingStep } from './generationRules';
 import { useDraftChecks, useGeneration } from './useDraftChecks';
 import { useStartValidation } from '@/pages/validation/useValidation';
 
@@ -234,7 +235,8 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
           <SaveStatus state={ed.state} version={creative?.version} />
         </HStack>
         <PostPreview tenantName={context.tenant.name} caption={ed.text.caption} format={format}
-          image={gen.assetId ? { assetId: gen.assetId, alt: imageAltForBrief(creative?.current_prompt) } : undefined} />
+          image={gen.assetId ? { assetId: gen.assetId, alt: imageAltForBrief(creative?.current_prompt) } : undefined}
+          generating={generatingStep({ job: gen.job, starting: gen.starting }) ?? undefined} />
         {creative && (
           <Button variant="secondary" block href={`/marketing/create/${encodeURIComponent(creative.id)}/preview`}
             onClick={(e) => { if (ed.dirty) { e.preventDefault(); toast('Save your changes first', 'waiting', 'The final preview shows saved versions only.'); } }}>

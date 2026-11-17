@@ -11,7 +11,9 @@ import { Divider } from '@astryxdesign/core/Divider';
 import { Grid } from '@astryxdesign/core/Grid';
 import { Link as AxLink } from '@astryxdesign/core/Link';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
+import { Overlay } from '@astryxdesign/core/Overlay';
 import { Section } from '@astryxdesign/core/Section';
+import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { HStack, VStack, StackItem } from '@astryxdesign/core/Layout';
 import type { PostFormat, StudySnapshot } from '@/api/session';
 import type { Creative, Versioned } from '@/api/creatives';
@@ -107,7 +109,7 @@ export function RequiredWording({ texts }: { texts: string[] }): ReactElement | 
 /* ---------- Live preview ---------- */
 
 /** How the post reads, before any image exists. Always a draft for review. */
-export function PostPreview({ tenantName, caption, format, image, full }: {
+export function PostPreview({ tenantName, caption, format, image, full, generating }: {
   tenantName: string;
   caption: string;
   format?: PostFormat;
@@ -115,8 +117,23 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
   image?: { assetId: string; alt: string; provenance?: boolean };
   /** Final preview: the caption is never shortened. */
   full?: boolean;
+  /**
+   * The step ("Step 3 of 5") while an image is being made for this version, else unset.
+   * The frame is marked busy; the generation step's own status region announces the
+   * progress, so there is no second live region here to read it twice.
+   */
+  generating?: string;
 }): ReactElement {
   const ratio = format ? format.width_px / format.height_px : 1;
+  // On a card surface, so the label stays readable over any picture in both themes.
+  const busyLabel = (title: string) => (
+    <AxCard padding={3}>
+      <VStack gap={1} hAlign="center">
+        <Text type="body" weight="semibold" justify="center">{title}</Text>
+        <Text type="supporting" color="secondary" justify="center">{generating}</Text>
+      </VStack>
+    </AxCard>
+  );
   return (
     <AxCard padding={0} data-card="">
       <Section variant="transparent" padding={4}>
@@ -138,9 +155,19 @@ export function PostPreview({ tenantName, caption, format, image, full }: {
           </Text>
         </VStack>
       </Section>
-      {image
+      {image && generating ? (
+        // The earlier image stays, dimmed, until the new one replaces it.
+        <Overlay aria-busy="true" scrim="dark" align="center" content={busyLabel('Generating a new image…')}>
+          <GeneratedImagePreview assetId={image.assetId} alt={image.alt} ratio={ratio} provenance={image.provenance} />
+        </Overlay>
+      ) : image
         ? <GeneratedImagePreview assetId={image.assetId} alt={image.alt} ratio={ratio} provenance={image.provenance} />
-        : (
+        : generating ? (
+          // Same frame as the image, so nothing moves when it arrives. Skeleton stops its pulse under reduced motion.
+          <Overlay aria-busy="true" scrim={false} align="center" content={busyLabel('Generating image…')}>
+            <AspectRatio ratio={ratio} fit="cover"><Skeleton radius="none" /></AspectRatio>
+          </Overlay>
+        ) : (
           <AspectRatio ratio={ratio} fit="cover">
             <Center axis="both" height="100%" padding={6}>
               <VStack gap={2} hAlign="center">

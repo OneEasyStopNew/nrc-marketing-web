@@ -106,6 +106,9 @@ export interface JobProgress {
   label: string;
 }
 
+/** "Step 3 of 5": the progress bar and the Preview's placeholder say the same. */
+export const stepText = (p: JobProgress): string => `Step ${p.step + 1} of ${JOB_STEPS.length}`;
+
 function stageProgress(stage: JobStage): JobProgress {
   switch (stage) {
     case 'submitting':

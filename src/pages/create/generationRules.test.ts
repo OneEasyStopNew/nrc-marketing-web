@@ -5,6 +5,7 @@ import {
   commandAfterProblem,
   commandFor,
   generationAnnouncement,
+  generatingStep,
   JOB_POLL_MAX_AGE_MS,
   jobPollDelay,
   jobPollingExpired,
@@ -121,5 +122,28 @@ describe('generationAnnouncement', () => {
     expect(generationAnnouncement({ job: { state: 'RUNNING', stage: null }, starting: false, pollingStopped: true })).toBe(
       'Automatic checking has stopped',
     );
+  });
+});
+
+describe('generatingStep (the Preview placeholder)', () => {
+  const at = (state: JobState, stage: string | null = null) => ({ state, stage });
+
+  it('is shown while the job is queued, running or waiting on the image service, with the same step as the progress bar', () => {
+    expect(generatingStep({ job: at('QUEUED'), starting: false })).toBe('Step 1 of 5');
+    expect(generatingStep({ job: at('RUNNING', 'submitting'), starting: false })).toBe('Step 2 of 5');
+    expect(generatingStep({ job: at('WAITING_PROVIDER', 'waiting_provider'), starting: false })).toBe('Step 3 of 5');
+    expect(generatingStep({ job: at('RUNNING', 'fetching_output'), starting: false })).toBe('Step 4 of 5');
+  });
+
+  it('is shown while the start request is on its way, even over an earlier finished job', () => {
+    expect(generatingStep({ job: undefined, starting: true })).toBe('Starting');
+    expect(generatingStep({ job: at('SUCCEEDED', 'stored'), starting: true })).toBe('Starting');
+  });
+
+  it('goes away for every end or waiting state, so the step shows its own message instead', () => {
+    for (const state of ['SUCCEEDED', 'FAILED', 'CANCELLED', 'CANCEL_REQUESTED', 'UNKNOWN', 'NEEDS_REVIEW'] as const) {
+      expect(generatingStep({ job: at(state), starting: false }), state).toBeNull();
+    }
+    expect(generatingStep({ job: undefined, starting: false })).toBeNull();
   });
 });

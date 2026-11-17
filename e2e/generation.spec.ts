@@ -104,6 +104,47 @@ test('a new image replaces the earlier one as soon as it is ready, without a rel
   // The picture looks the same in simulation; the preview's checksum says which image it is.
   await expect(seen(page, new RegExp(`Checksum ${made}`)).first()).toBeVisible({ timeout: 15_000 });
   expect(before).not.toContain(made);
+  await expect(seen(page, 'Generating a new image…')).toHaveCount(0);
+});
+
+test('the Preview shows the earlier image as busy while a new one is generated', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  await page.getByRole('button', { name: 'Generate a new image' }).click();
+  const label = seen(page, 'Generating a new image…');
+  await expect(label).toBeVisible();
+  await expect(page.locator('[aria-busy="true"]').filter({ has: label })).toHaveCount(1);
+  await expect(page.locator('[aria-busy="true"]').filter({ has: label }).getByRole('img', { name: /^Generated image for the brief/ })).toBeVisible();
+  await expect(label).toHaveCount(0, { timeout: 15_000 });
+  await expect(seen(page, 'Image ready')).toBeVisible();
+});
+
+/** A new draft whose brief passes the placeholder rules, validated and back on the draft page. */
+async function passedNewDraft(page: Page) {
+  await signInAt(page, '/marketing/create', 'creator');
+  await brief(page).fill('An optional research study for adults, explained by the study team near them.');
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page).toHaveURL(/\/marketing\/create\/[^/]+$/);
+  await page.getByRole('button', { name: 'Validate version 1' }).click();
+  await expect(seen(page, 'Passed the assessed checks').first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('link', { name: 'Revise the brief' }).click();
+  await expect(page.getByRole('button', { name: 'Generate image' })).toBeEnabled();
+}
+
+test('the Preview shows a busy placeholder in the image frame while a first image is generated', async ({ page }) => {
+  await passedNewDraft(page);
+  const empty = seen(page, 'The image is generated from the brief after it passes validation.');
+  await expect(empty).toBeVisible();
+  const frameHeight = await empty.evaluate((el) => el.closest('[data-card]')?.getBoundingClientRect().height ?? 0);
+
+  await page.getByRole('button', { name: 'Generate image' }).click();
+  const label = seen(page, 'Generating image…');
+  await expect(label).toBeVisible();
+  await expect(empty).toHaveCount(0);
+  await expect(page.locator('[aria-busy="true"]').filter({ has: label })).toHaveCount(1);
+  // Same frame as the empty one: the card does not change height.
+  expect(await label.evaluate((el) => el.closest('[data-card]')?.getBoundingClientRect().height ?? 0)).toBeCloseTo(frameHeight, 0);
+  await expect(label).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole('img', { name: /^Generated image for the brief/ }).first()).toBeVisible();
 });
 
 test('a tampered job reference in this tab is ignored, and Generate stays available', async ({ page }) => {
