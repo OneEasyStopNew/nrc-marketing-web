@@ -44,4 +44,34 @@ export const IN_DEVELOPMENT = {
    * Validation start page.
    */
   draftList: true,
+  /**
+   * Checking a client's existing post without generating (NRC-41). The
+   * endpoints are a frontend proposal (api/clientPosts.ts) until Dinesh's
+   * NRC-40 and Firoz's uploads (NRC-3) and validators (NRC-8/9) exist. While
+   * true, real builds hide the entry; the simulation shows it so the screens
+   * can be built and reviewed. Set to false when the backend endpoints are live.
+   */
+  validationOnly: true,
+  /**
+   * The optional, paid AI fix of a flagged client image (NRC-41). Needs the
+   * generation service (Firoz, NRC-5) and the proposed /client-posts/{id}/ai-fixes
+   * endpoints (Dinesh, NRC-40). While true, real builds do not offer it; the
+   * simulation does. Set to false when those endpoints are live.
+   */
+  clientAiFix: true,
+  /**
+   * Usage and balance (NRC-44). The endpoints are a frontend proposal
+   * (api/usage.ts) until Firoz's NRC-42/NRC-43 exist. Set to false when they are live.
+   */
+  usage: true,
+  /**
+   * Dashboards (NRC-46). The analytics endpoint is a frontend proposal
+   * (api/analytics.ts) until Dinesh's NRC-45 exists. Set to false when it is live.
+   */
+  analytics: true,
+  /**
+   * Choosing the image model and "Text in image" (NRC-21). Needs Firoz's
+   * GET /generation-models and Dinesh's image_text. Set to false when both are live.
+   */
+  modelChoice: true,
 } as const;

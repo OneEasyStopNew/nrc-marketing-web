@@ -2,7 +2,10 @@ import type { Capability, Language, PostFormat, StudySnapshot, TenantMembership 
 import type { CreativeVersion } from '@/api/creatives';
 import type { Schemas } from '@/api/schemas.gen';
 import type { Creative } from '@/api/creatives';
-import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount } from '@/api/workspace';
+import type { ClientCheck, ClientMedia, ClientPost } from '@/api/clientPosts';
+import type { Attempt, Balance, PriceList } from '@/api/usage';
+import type { GenerationModel } from '@/api/generationModels';
+import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount, SocialChannel, SocialSet } from '@/api/workspace';
 
 /**
  * Shape of the local dummy data file `src/mocks/data.ts`.
@@ -87,6 +90,48 @@ export interface MockJob {
   asset: MockAsset;
 }
 
+/** A client's own post (NRC-41, proposed contract in api/clientPosts.ts) plus what the API keeps internally. */
+export interface MockClientPost extends Omit<ClientPost, 'media' | 'generation_requests'> {
+  tenant_id: string;
+  /** Paid AI fix requests made for this post; missing in posts saved before AI fixes existed. */
+  generation_requests?: number;
+  /** Asset ids in posting order; the files themselves are in the uploads store. */
+  asset_ids: string[];
+  /** Who saved the current version (the creator for version 1). */
+  updated_by?: string;
+  /** Earlier versions, oldest first. */
+  history: { version: number; caption: string | null; asset_ids: string[]; change_note: string | null; created_by?: string; created_at?: string }[];
+}
+
+/** An uploaded client file, or the new picture from an AI fix. */
+export interface MockClientMedia extends Omit<ClientMedia, 'preview_url'> {
+  tenant_id: string;
+  origin?: 'ai_fix';
+}
+
+/** A combined check of one client post version. */
+export interface MockClientCheck {
+  tenant_id: string;
+  post_id: string;
+  started_ms: number;
+  /** The check as it reads once finished. */
+  final: ClientCheck;
+}
+
+/** A paid AI fix of one client image. */
+export interface MockAiFix {
+  tenant_id: string;
+  fix_id: string;
+  post_id: string;
+  post_version: number;
+  asset_id: string;
+  instructions: string | null;
+  started_ms: number;
+  created_by: string;
+  /** The new picture, filed in the uploads store when the fix finishes. */
+  result: MockClientMedia;
+}
+
 /** What data.ts must export. Later tickets add their collections here. */
 export interface MockData {
   TENANTS: Record<string, TenantMembership>;
@@ -117,6 +162,29 @@ export interface MockData {
    * 404 NOT_FOUND. Optional so data.ts files without it still compile.
    */
   NO_ACTIVE_POLICY_TENANTS?: readonly string[];
+  /**
+   * Generation usage per tenant id (NRC-44, proposed contract in api/usage.ts).
+   * Missing tenant = balance unavailable and no attempts. Optional so data.ts
+   * files without it still compile.
+   */
+  USAGE?: Record<string, MockUsage>;
+  /** The provider price list (NRC-44). */
+  PRICES?: PriceList;
+  /**
+   * What a newly connected account of each network can do in simulation
+   * (NRC-39). The real capabilities come from the backend per account.
+   */
+  /** Image models offered for generation (NRC-21). Missing = no model choice: the default is used. */
+  GENERATION_MODELS?: GenerationModel[];
+  /** Figures each network reported per account (NRC-46); a missing account reports none. */
+  SOCIAL_METRICS?: Record<string, { impressions: number | null; engagements: number | null; video_views: number | null }>;
+  CHANNEL_CAPABILITIES?: Record<SocialChannel, Pick<SocialAccount, 'formats' | 'caption_max' | 'publish_mode' | 'required_fields' | 'permissions'>>;
+}
+
+/** One organisation's generation usage. Amounts are visibly fake simulation values. */
+export interface MockUsage {
+  balance: Balance;
+  attempts: OmitKnown<Attempt, never>[];
 }
 
 /**
@@ -130,6 +198,8 @@ export interface MockWorkspace {
   media: OmitKnown<MediaAsset, 'preview_url'>[];
   rules: PolicyRule[];
   approvals: OmitKnown<ApprovalRequest, 'is_own'>[];
+  /** Brand or region groups of accounts (NRC-31/NRC-39). */
+  social_sets: SocialSet[];
   accounts: SocialAccount[];
   publications: Publication[];
   members: Member[];

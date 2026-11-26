@@ -261,6 +261,15 @@ describe('buildValidationReport: content', () => {
     expect(doc).toContain('<strong>NEEDS_REVIEW</strong> Needs review');
   });
 
+  it('labels a rule that needs a person as Needs review, never as a pass', () => {
+    const run = makeRun({
+      outcome: 'NEEDS_REVIEW',
+      rule_results: [{ rule_id: 'R9', rule_version: 1, mandatory: true, result: 'NEEDS_REVIEW', reason: 'Two rules disagree.' }],
+    });
+    const doc = buildValidationReport(makeInput({ run }));
+    expect(doc).toContain('<td class="evidence">R9</td><td>1</td><td>Yes</td><td><strong>Needs review</strong></td><td class="evidence">Two rules disagree.</td>');
+  });
+
   it('shows PASS only as passing the assessed checks', () => {
     const doc = buildValidationReport(makeInput({ run: makeRun({ outcome: 'PASS', rule_results: [] }) }));
     expect(doc).toContain('<strong>PASS</strong> Passed the assessed checks');

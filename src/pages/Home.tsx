@@ -16,13 +16,12 @@ import type { ActivityItem, ApprovalRequest, DraftSummary, Publication, SocialAc
 import { Button } from '@/components/ui/Button';
 import { EmptyState, PageHeader } from '@/components/ui/Misc';
 import { ROLE_LABELS } from '@/components/layout/AppLayout';
-import { IN_DEVELOPMENT } from '@/config/inDevelopment';
 import { RULE_ADMIN_PATH } from '@/pages/rules/activePolicy';
 import {
   useAccounts, useActivity, useApprovals, useDrafts, useMembers, usePublications, useRules,
 } from './shared/queries';
 import {
-  AccountBadge, InDevelopment, PublicationBadge, QueryState, ReviewBadge, SectionTitle, StatCard, ValidationBadge,
+  AccountBadge, InDevelopment, PublicationBadge, QueryState, ReviewBadge, SectionTitle, StatCard, ValidationBadge, useInDevelopment,
 } from './shared/ui';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -34,6 +33,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
  * lists the sections show; nothing is invented.
  */
 export default function Home(): ReactElement {
+  const dashboardsInDev = useInDevelopment('dashboards');
   const { can } = useAuth();
   const { me, context } = useSession();
   const roles = context.roles;
@@ -46,7 +46,7 @@ export default function Home(): ReactElement {
         description={`${roles.map((r) => ROLE_LABELS[r]).join(', ') || 'No role'} in ${context.tenant.name}.`} />
 
       {/* The role dashboards and the activity feed are in no ticket yet (config/inDevelopment.ts). */}
-      {IN_DEVELOPMENT.dashboards && roles.length > 0 && (
+      {dashboardsInDev && roles.length > 0 && (
         <InDevelopment feature="Your dashboard" description="An overview of your work and recent activity is being built and will be available soon. Use the menu to open each section." />
       )}
 
@@ -55,7 +55,7 @@ export default function Home(): ReactElement {
           description={`${me.display_name}, your role here does not include any Marketing section. Ask an administrator for the role you need.`} />
       )}
 
-      {!IN_DEVELOPMENT.dashboards && (
+      {!dashboardsInDev && (
         <>
           {roles.includes('admin') && can('membership:manage') && <AdminOverview />}
           {has('creator') && can('creative:write') && <CreatorDashboard />}

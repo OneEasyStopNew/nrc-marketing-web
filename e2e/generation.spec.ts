@@ -19,6 +19,8 @@ test.afterEach(() => { expect(pageErrors, 'page errors').toEqual([]); });
 const SEEDED = '/marketing/create/sim-cr-0001';
 const brief = (page: Page) => page.getByRole('textbox', { name: /^Brief/ });
 const generate = (page: Page) => page.getByRole('button', { name: /^Generate (image|a new image)$/ });
+/** NRC-21: say whether the image shows text before generating; No keeps the default model. */
+const noText = (page: Page) => page.getByRole('radio', { name: 'No', exact: true }).check();
 
 test('a new draft cannot be generated until its brief passes', async ({ page }) => {
   await signInAt(page, '/marketing/create', 'creator');
@@ -34,6 +36,7 @@ test('a passed brief can be generated; the job survives a reload and the image c
   await signInAt(page, SEEDED, 'creator');
   await expect(seen(page, 'Allowed', { exact: true })).toBeVisible();
 
+  await noText(page);
   await generate(page).click();
   await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
   // Reload mid-job (tokens live in memory, so sign in again): the same job is followed, no second one is started.
@@ -51,7 +54,7 @@ test('a passed brief can be generated; the job survives a reload and the image c
   await expect(seen(page, /starts 12% from the left and 55% from the top/).first()).toBeVisible();
 
   // Back on the draft, the image check is listed with its result; passing the brief is still not approval.
-  await page.getByRole('link', { name: 'Revise the brief' }).click();
+  await page.getByRole('link', { name: 'Back to the draft' }).click();
   await expect(page).toHaveURL(new RegExp(`${SEEDED}$`));
   await expect(page.getByRole('link', { name: 'Image check results' })).toBeVisible();
   await expect(seen(page, 'Validation is an automated check, not an approval.')).toBeVisible();
@@ -59,6 +62,7 @@ test('a passed brief can be generated; the job survives a reload and the image c
 
 test('an edit turns generation off until the new version is validated', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
+  await noText(page);
   await expect(generate(page)).toBeEnabled();
   await brief(page).press('Control+End');
   await brief(page).pressSequentially(' More.');
@@ -77,6 +81,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test('a double click starts one job, with a UUID like the API issues', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
+  await noText(page);
   await expect(generate(page)).toBeEnabled();
   await generate(page).dblclick();
   await expect(seen(page, /The image is being generated|Sending the brief|Waiting to start/).first()).toBeVisible();
@@ -87,6 +92,7 @@ test('a double click starts one job, with a UUID like the API issues', async ({ 
 
 test('a tampered job reference in this tab is ignored, and Generate stays available', async ({ page }) => {
   await signInAt(page, SEEDED, 'creator');
+  await noText(page);
   await expect(generate(page)).toBeEnabled();
   // A job id that is not a UUID must never reach a request path.
   await page.evaluate(() => sessionStorage.setItem(
@@ -96,6 +102,28 @@ test('a tampered job reference in this tab is ignored, and Generate stays availa
   await page.reload();
   await page.locator('li button', { hasText: 'Marketing creator' }).click();
   await page.waitForURL((u) => u.pathname === SEEDED);
+  await noText(page);
   await expect(generate(page)).toBeEnabled();
   expect(await storedJobIds(page)).toHaveLength(0);
 });
+
+test('the model follows the text question, and a refused request is shown next to its field', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  // No model and no generating until the question is answered.
+  await expect(page.getByRole('radio', { name: 'No', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: /Image model/ })).toHaveCount(0);
+  await expect(generate(page)).toBeDisabled();
+
+  await page.getByRole('radio', { name: 'No', exact: true }).check();
+  await expect(page.getByRole('combobox', { name: /Image model/ })).toContainText('Soul 2 (simulation) (default)');
+  await expect(generate(page)).toBeEnabled();
+
+  // Text in the image: Ideogram only, its cost shown, and the text is required.
+  await page.getByRole('radio', { name: /Yes, words in the picture/ }).check();
+  await expect(page.getByRole('combobox', { name: /Image model/ })).toHaveCount(0);
+  await expect(seen(page, /Model: Ideogram \(simulation\).*\$0\.06 an image, compared with \$0\.006/)).toBeVisible();
+  await expect(generate(page)).toBeDisabled();
+  await page.getByRole('textbox', { name: /^Text in the image/ }).fill('Living with high blood pressure?');
+  await expect(seen(page, /characters left for the brief and the image text together/)).toBeVisible();
+  await expect(generate(page)).toBeEnabled();
+});

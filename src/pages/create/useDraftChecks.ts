@@ -5,7 +5,8 @@ import { useSession } from '@/auth/AuthProvider';
 import { useAsset, useDraftExport, type Asset } from '@/api/assets';
 import { creativesApi, currentValidation, latestValidation, type Creative, type GenerationEligibility, type ValidationKind, type ValidationRunSummary } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
-import { isJobDone, isJobUnsettled, isUuid, jobKeys, jobsApi, newJobKey, type Job } from '@/api/jobs';
+import { isJobDone, isJobUnsettled, isUuid, jobKeys, jobsApi, newJobKey, type ImageChoice, type Job } from '@/api/jobs';
+import { requestProblemOf, type RequestProblem } from '@/api/generationModels';
 import { isInProgress } from '@/api/validations';
 import { useToast } from '@/components/ui/Toast';
 import { knownRuns } from '@/pages/validation/knownRuns';
@@ -146,7 +147,11 @@ export interface Generation {
   /** A read of the job is in flight. */
   checking: boolean;
   starting: boolean;
-  start: () => Promise<void>;
+  /** Starts a job; choice is the model and image text (NRC-21), left out when not chosen. */
+  start: (choice?: ImageChoice) => Promise<void>;
+  /** Why the last start was refused, tied to the field it is about (422 GENERATION_REQUEST_INVALID). */
+  requestProblem: RequestProblem | null;
+  clearRequestProblem: () => void;
   assetId: string | null;
   asset: UseQueryResult<Asset>;
   /** True until it is known whether the current version has an image. */
@@ -170,6 +175,7 @@ export function useGeneration(creative: Creative | undefined): Generation {
   const storeKey = creative ? jobKey(tenantId, creative.id) : '';
   const [ref, setRef] = useState<JobRef | null>(() => (storeKey ? readJob(storeKey) : null));
   const [starting, setStarting] = useState(false);
+  const [requestProblem, setRequestProblem] = useState<RequestProblem | null>(null);
   /** Same key while the same request is retried; a new one for a new generation. */
   const pending = useRef<PendingCommand | null>(null);
   // Set synchronously, so a second click in the same frame is ignored before React re-renders.
@@ -219,16 +225,18 @@ export function useGeneration(creative: Creative | undefined): Generation {
    * Generate resends the same key, so the backend answers with the job it may
    * already have made instead of starting (and charging for) a second one.
    */
-  const start = async () => {
+  const start = async (choice?: ImageChoice) => {
     if (!creative || inFlight.current || active || unsettled) return;
+    setRequestProblem(null);
     inFlight.current = true;
     const ctrl = new AbortController();
     request.current = ctrl;
-    const command = commandFor(pending.current, `${creative.id}:${creative.version}`, newJobKey);
+    // A different model or image text is a different request, so it gets its own key.
+    const command = commandFor(pending.current, `${creative.id}:${creative.version}:${choice?.model ?? ''}:${choice?.image_text ?? ''}`, newJobKey);
     pending.current = command;
     setStarting(true);
     try {
-      const accepted = await jobsApi.startImage(creative.id, creative.version, command.key, ctrl.signal);
+      const accepted = await jobsApi.startImage(creative.id, creative.version, command.key, ctrl.signal, choice);
       if (ctrl.signal.aborted) return;
       pending.current = null;
       const next = { job_id: accepted.job_id, version: creative.version };
@@ -240,6 +248,9 @@ export function useGeneration(creative: Creative | undefined): Generation {
       setRef(next);
     } catch (e: unknown) {
       if (ctrl.signal.aborted) return; // The user left; nothing to show.
+      // A refused model, image text or brief length is shown next to its field, not as a toast.
+      const field = requestProblemOf(e);
+      if (field) { pending.current = null; setRequestProblem(field); return; }
       const p = isApiError(e) ? startProblem(e) : UNEXPECTED_PROBLEM;
       pending.current = commandAfterProblem(command, p);
       toast(p.title, p.sameCommand ? 'waiting' : 'blocked', p.detail);
@@ -260,6 +271,8 @@ export function useGeneration(creative: Creative | undefined): Generation {
     checking: jobQ.isFetching,
     starting,
     start,
+    requestProblem,
+    clearRequestProblem: () => setRequestProblem(null),
     assetId,
     asset,
     /** True until it is known whether the current version has an image. */

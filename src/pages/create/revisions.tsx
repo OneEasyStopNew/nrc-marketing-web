@@ -17,6 +17,7 @@ import { Card, CardBody, CardFoot, CardHead } from '@/components/ui/Card';
 import { Alert, SkeletonRows } from '@/components/ui/Misc';
 import { Modal } from '@/components/ui/Overlay';
 import { diffWords, isUnchanged } from '@/lib/diff';
+import { applySuggestion } from '@/api/clientPosts';
 import { fmtDateTime } from '@/lib/utils';
 import { knownRuns } from '@/pages/validation/knownRuns';
 import { useValidationRun } from '@/pages/validation/useValidation';
@@ -152,7 +153,8 @@ function CompareDialog({ version, current, readOnly, onClose, onRestore }: {
   );
 }
 
-function DiffBlock({ label, before, after }: { label: string; before: string; after: string }) {
+/** Word differences between two texts, under a heading. */
+export function DiffBlock({ label, before, after }: { label: string; before: string; after: string }): ReactElement {
   const parts = useMemo(() => diffWords(before, after), [before, after]);
   return (
     <section aria-label={`${label} differences`}><VStack gap={2}>
@@ -179,19 +181,22 @@ function DiffBlock({ label, before, after }: { label: string; before: string; af
  * fix them in place. They describe the version that was checked; after an
  * edit they are a to-do list, not a result.
  */
-export function FindingsToFix({ creative, editing }: { creative: Creative; editing: boolean }): ReactElement | null {
+/** Where an applied suggestion goes: the brief or the caption. */
+export type FixField = 'prompt' | 'caption';
+
+export function FindingsToFix({ creative, editing, onApply }: { creative: Creative; editing: boolean; onApply?: (field: FixField, next: string) => void }): ReactElement | null {
   const { context } = useSession();
   const latest = latestValidation(creative);
   if (latest) {
     if (isInProgress(latest.state) || latest.state === 'FAILED' || latest.state === 'CANCELLED' || latest.outcome === 'PASS') return null;
-    return <FindingsToFixList creative={creative} runId={latest.validation_run_id} editing={editing} />;
+    return <FindingsToFixList creative={creative} runId={latest.validation_run_id} editing={editing} onApply={onApply} />;
   }
   // The API does not list this draft's runs: use the newest text check started in this tab.
   const known = knownRuns(context.tenant.tenant_id, creative.id).find((r) => r.kind !== 'image');
-  return known ? <FindingsToFixList creative={creative} runId={known.id} editing={editing} /> : null;
+  return known ? <FindingsToFixList creative={creative} runId={known.id} editing={editing} onApply={onApply} /> : null;
 }
 
-function FindingsToFixList({ creative, runId, editing }: { creative: Creative; runId: string; editing: boolean }) {
+function FindingsToFixList({ creative, runId, editing, onApply }: { creative: Creative; runId: string; editing: boolean; onApply?: (field: FixField, next: string) => void }) {
   const q = useValidationRun(runId);
   const run = q.data;
   // A run that can't be read must not look like "nothing to fix" (e.g. a response that fails the contract).
@@ -220,11 +225,26 @@ function FindingsToFixList({ creative, runId, editing }: { creative: Creative; r
       {older && <Text type="body" color="secondary">These are for version {run.creative_version}. After your changes, validate again to see what is still open.</Text>}
       <List listStyle="disc" density="compact">
         {unassessed.map((r) => <ListItem key={r.rule_id} label={r.reason ?? `${r.rule_id} could not be assessed.`} />)}
-        {run.findings.map((f, i) => (
-          <ListItem key={i}
-            label={<>{f.offending_excerpt && <><q>{f.offending_excerpt}</q>: </>}{f.explanation}</>}
-            description={f.suggested_correction ? `Suggested: ${f.suggested_correction}` : undefined} />
-        ))}
+        {run.findings.map((f, i) => {
+          // Only exact replacement words for the version that was checked, never advice applied by guesswork (NRC-22).
+          const field: FixField | null = run.input_kind === 'brief' ? 'prompt' : run.input_kind === 'text' ? 'caption' : null;
+          const next = !older && onApply && field ? applySuggestion(field === 'prompt' ? creative.current_prompt : creative.caption ?? '', f) : null;
+          return (
+            <ListItem key={i}
+              label={<>{f.offending_excerpt && <><q>{f.offending_excerpt}</q>: </>}{f.explanation}</>}
+              description={(
+                <VStack gap={1} hAlign="start">
+                  {f.suggested_correction && <Text type="supporting" color="secondary">Suggested: {f.suggested_correction}</Text>}
+                  {next != null && field && (
+                    <Button size="sm" variant="secondary" icon="check" onClick={() => onApply?.(field, next)}
+                      aria-label={`Use the suggested wording for ${f.rule_id}`}>
+                      Use the suggested wording
+                    </Button>
+                  )}
+                </VStack>
+              )} />
+          );
+        })}
       </List>
     </VStack></section>
   );

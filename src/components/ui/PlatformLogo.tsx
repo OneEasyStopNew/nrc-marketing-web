@@ -1,21 +1,28 @@
 import { useId, type SVGProps, type ReactElement } from 'react';
-import { siFacebook, siInstagram } from 'simple-icons';
-import { Icon as AxIcon } from '@astryxdesign/core/Icon';
+import { siFacebook, siInstagram, siPinterest, siSnapchat, siThreads, siTiktok, siYoutube, type SimpleIcon } from 'simple-icons';
+import { GlobeAltIcon } from '@heroicons/react/24/outline';
+import { Icon as AxIcon, type IconType } from '@astryxdesign/core/Icon';
 import { HStack } from '@astryxdesign/core/Layout';
 import { Text } from '@astryxdesign/core/Text';
 
-export type Platform = 'facebook' | 'instagram';
+export type Platform = 'facebook' | 'instagram' | 'threads' | 'tiktok' | 'linkedin' | 'youtube' | 'pinterest' | 'snapchat';
 
-const NAME: Record<Platform, string> = { facebook: 'Facebook', instagram: 'Instagram' };
+/** The networks' own names, as they write them. */
+export const PLATFORM_NAME: Record<Platform, string> = {
+  facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', tiktok: 'TikTok',
+  linkedin: 'LinkedIn', youtube: 'YouTube', pinterest: 'Pinterest', snapchat: 'Snapchat',
+};
 
 /**
  * The official platform marks (paths from Simple Icons, CC0), unaltered:
- * Facebook in its brand blue, the Instagram glyph in its brand gradient.
- * Never recolour, stretch or redraw them.
+ * each in its brand colour; the black marks (Threads, TikTok) follow the text
+ * colour so they stay visible in dark mode, as their brand rules allow.
+ * Never recolour, stretch or redraw them. Simple Icons has no LinkedIn mark,
+ * so LinkedIn shows a neutral icon and its name, never a redrawn logo.
  */
-function FacebookMark(props: SVGProps<SVGSVGElement>) {
-  return <svg {...props} viewBox="0 0 24 24"><path d={siFacebook.path} fill={`#${siFacebook.hex}`} /></svg>;
-}
+const simple = (icon: SimpleIcon): IconType => function Mark(props: SVGProps<SVGSVGElement>) {
+  return <svg {...props} viewBox="0 0 24 24"><path d={icon.path} fill={icon.hex === '000000' ? 'currentColor' : `#${icon.hex}`} /></svg>;
+};
 
 function InstagramMark(props: SVGProps<SVGSVGElement>) {
   const id = useId();
@@ -35,12 +42,15 @@ function InstagramMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-const MARK = { facebook: FacebookMark, instagram: InstagramMark };
+const MARK: Record<Platform, IconType> = {
+  facebook: simple(siFacebook), instagram: InstagramMark, threads: simple(siThreads), tiktok: simple(siTiktok),
+  linkedin: GlobeAltIcon, youtube: simple(siYoutube), pinterest: simple(siPinterest), snapchat: simple(siSnapchat),
+};
 
 /** Which platform a label such as "Facebook · Feed image (1:1)" names, if any. */
 export function platformOf(text: string | null | undefined): Platform | null {
   const t = (text ?? '').toLowerCase();
-  return t.startsWith('facebook') ? 'facebook' : t.startsWith('instagram') ? 'instagram' : null;
+  return (Object.keys(PLATFORM_NAME) as Platform[]).find((p) => t.startsWith(p)) ?? null;
 }
 
 /**
@@ -48,7 +58,7 @@ export function platformOf(text: string | null | undefined): Platform | null {
  * platform's name is written right next to it, so it is not read twice.
  */
 export function PlatformLogo({ platform, size = 20, decorative }: { platform: Platform; size?: 16 | 20 | 24; decorative?: boolean }): ReactElement {
-  return <AxIcon icon={MARK[platform]} size={({ 16: 'sm', 20: 'md', 24: 'lg' } as const)[size]} label={decorative ? undefined : NAME[platform]} />;
+  return <AxIcon icon={MARK[platform]} size={({ 16: 'sm', 20: 'md', 24: 'lg' } as const)[size]} label={decorative ? undefined : PLATFORM_NAME[platform]} />;
 }
 
 /** "Facebook · Feed image (1:1)" with the Facebook logo in front; plain text when no platform is named. */

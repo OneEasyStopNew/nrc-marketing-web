@@ -1,0 +1,234 @@
+{
+  "validation_run_id": "b7e3d1f4-2a6c-4d8e-9f1b-3c5a7e9d2b08",
+  "manifest_sha256": "3f2a9c1e7b4d6058a1e9c3b7d5f20486e1c9a7b3d5f2e08c4a6b1d9e7f3c5a20",
+  "policy_bundle_id": "a1d4c7e2-8b3f-4e6a-9c5d-2f7b1e8a4c06",
+  "policy_bundle_version": 1,
+  "is_synthetic": true,
+  "study_snapshot_id": "e5d2a8c4-1f3b-4a6d-9c7e-8b2f5d1a3c03",
+  "study_snapshot_version": 1,
+  "input_kind": "brief",
+  "channel": "facebook",
+  "post_format": "feed_image",
+  "language": "en",
+  "audience": null,
+  "jurisdiction": null,
+  "evaluated_at": "2026-11-18T10:00:00Z",
+  "retrieval_mode": "lexical_only",
+  "embedding_model_id": null,
+  "statements": [
+    {
+      "span": null
+    }
+  ],
+  "required_rules": [
+    {
+      "rule_id": "REC-01",
+      "rule_version": 1,
+      "node_key": "REC-01",
+      "mandatory": true,
+      "check_type": "semantic",
+      "gate": "policy",
+      "severity": "critical",
+      "unresolved": []
+    },
+    {
+      "rule_id": "REC-02",
+      "rule_version": 1,
+      "node_key": "REC-02",
+      "mandatory": true,
+      "check_type": "semantic",
+      "gate": "policy",
+      "severity": "critical",
+      "unresolved": []
+    },
+    {
+      "rule_id": "REC-03",
+      "rule_version": 1,
+      "node_key": "REC-03",
+      "mandatory": true,
+      "check_type": "semantic",
+      "gate": "policy",
+      "severity": "major",
+      "unresolved": []
+    },
+    {
+      "rule_id": "REC-04",
+      "rule_version": 1,
+      "node_key": "REC-04",
+      "mandatory": true,
+      "check_type": "semantic",
+      "gate": "policy",
+      "severity": "critical",
+      "unresolved": []
+    },
+    {
+      "rule_id": "REC-05",
+      "rule_version": 1,
+      "node_key": "REC-05",
+      "mandatory": true,
+      "check_type": "semantic",
+      "gate": "policy",
+      "severity": "major",
+      "unresolved": []
+    },
+    {
+      "rule_id": "REC-08",
+      "rule_version": 1,
+      "node_key": "REC-08",
+      "mandatory": true,
+      "check_type": "deterministic",
+      "gate": "study_facts",
+      "severity": "critical",
+      "unresolved": []
+    }
+  ],
+  "optional_rules": [],
+  "evidence": [
+    {
+      "node_key": "CL-FDA-1",
+      "node_type": "CLAUSE",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Recruitment material must not say or suggest that an investigational treatment is safe or effective for the condition under study.",
+      "clause_ref": "FDA-1",
+      "paths": [
+        [
+          "REC-01",
+          "supported_by",
+          "CL-FDA-1"
+        ]
+      ],
+      "matches": [
+        {
+          "statement_index": 0,
+          "found_by": [
+            "lexical"
+          ],
+          "rank": 4
+        }
+      ]
+    },
+    {
+      "node_key": "CL-FDA-1-ES",
+      "node_type": "CLAUSE",
+      "language": "es",
+      "excerpt": "[SYNTHETIC] El material de reclutamiento no debe decir ni sugerir que un tratamiento en investigación es seguro, eficaz o que cura la enfermedad en estudio.",
+      "clause_ref": "FDA-1-ES",
+      "paths": [
+        [
+          "REC-01",
+          "supported_by",
+          "CL-FDA-1-ES"
+        ]
+      ],
+      "matches": []
+    },
+    {
+      "node_key": "CL-FDA-2",
+      "node_type": "CLAUSE",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Recruitment material must not claim that an investigational treatment is equal or superior to another treatment.",
+      "clause_ref": "FDA-2",
+      "paths": [
+        [
+          "REC-02",
+          "supported_by",
+          "CL-FDA-2"
+        ]
+      ],
+      "matches": [
+        {
+          "statement_index": 0,
+          "found_by": [
+            "lexical"
+          ],
+          "rank": 3
+        }
+      ]
+    },
+    {
+      "node_key": "CL-FDA-3",
+      "node_type": "CLAUSE",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Calling an investigational treatment new, without saying it is investigational, implies it is proven.",
+      "clause_ref": "FDA-3",
+      "paths": [
+        [
+          "REC-03",
+          "supported_by",
+          "CL-FDA-3"
+        ]
+      ],
+      "matches": [
+        {
+          "statement_index": 0,
+          "found_by": [
+            "lexical"
+          ],
+          "rank": 1
+        }
+      ]
+    },
+    {
+      "node_key": "CL-FDA-4",
+      "node_type": "CLAUSE",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Recruitment material must not promise a certain favourable outcome or a benefit the consent document does not describe.",
+      "clause_ref": "FDA-4",
+      "paths": [
+        [
+          "REC-04",
+          "supported_by",
+          "CL-FDA-4"
+        ]
+      ],
+      "matches": []
+    },
+    {
+      "node_key": "CL-FDA-5",
+      "node_type": "CLAUSE",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Recruitment material must not promise free treatment; it may say that taking part costs nothing.",
+      "clause_ref": "FDA-5",
+      "paths": [
+        [
+          "REC-05",
+          "supported_by",
+          "CL-FDA-5"
+        ]
+      ],
+      "matches": [
+        {
+          "statement_index": 0,
+          "found_by": [
+            "lexical"
+          ],
+          "rank": 2
+        }
+      ]
+    },
+    {
+      "node_key": "INT-01",
+      "node_type": "INTERPRETATION",
+      "language": "en",
+      "excerpt": "[SYNTHETIC] Ages, eligibility and compensation in the copy must match the approved study snapshot.",
+      "clause_ref": null,
+      "paths": [
+        [
+          "REC-08",
+          "supported_by",
+          "INT-01"
+        ]
+      ],
+      "matches": []
+    }
+  ],
+  "exceptions": [],
+  "superseded": [],
+  "missing_context": [
+    {
+      "code": "SEMANTIC_SEARCH_SKIPPED",
+      "rule_id": null,
+      "detail": null
+    }
+  ]
+}

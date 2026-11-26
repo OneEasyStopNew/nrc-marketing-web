@@ -35,6 +35,11 @@ const SEVERITY: Record<Severity, { label: string; variant: BadgeVariant; mark: s
 };
 const SEVERITY_ORDER: Severity[] = ['critical', 'major', 'minor'];
 
+/** A rule's or finding's severity, as a word plus a colour. */
+export function SeverityBadge({ severity }: { severity: Severity }): ReactElement {
+  return <Badge variant={SEVERITY[severity].variant}>{SEVERITY[severity].label}</Badge>;
+}
+
 /** Execution state: is the run still working, did it finish, did it break. Never the policy result. */
 export function ExecutionBadge({ state }: { state: ExecutionState }): ReactElement {
   const [variant, text]: [BadgeVariant, string] = (() => {

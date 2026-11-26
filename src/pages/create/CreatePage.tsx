@@ -11,16 +11,21 @@ import { Card, CardHead } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Form';
 import { Alert, EmptyState, List, ListItem, PageHeader, SkeletonRows } from '@/components/ui/Misc';
 import { fmtDateTime } from '@/lib/utils';
-import { IN_DEVELOPMENT } from '@/config/inDevelopment';
-import { InDevelopment } from '@/pages/shared/ui';
+import { InDevelopment, useInDevelopment } from '@/pages/shared/ui';
 import { Composer } from './Composer';
 import FinalPreview from './FinalPreview';
+import { ClientPostPage } from './clientPost/ClientPostPage';
+import { EntryChoice } from './clientPost/EntryChoice';
+import { NewClientPost } from './clientPost/NewClientPost';
+import { useValidationOnlyAvailable } from './clientPost/useClientPost';
 
 /** /marketing/create (new brief), /marketing/create/:creativeId (existing draft) and .../preview (final preview). */
 export default function CreatePage(): ReactElement {
   return (
     <Routes>
       <Route index element={<NewBrief />} />
+      <Route path="check" element={<NewCheck />} />
+      <Route path="check/:postId" element={<CheckedPost />} />
       <Route path=":creativeId" element={<ExistingDraft />} />
       <Route path=":creativeId/preview" element={<FinalPreview />} />
     </Routes>
@@ -71,10 +76,31 @@ function NewBrief() {
 
   return (
     <Page>
+      <EntryChoice value="create" />
       <Composer study={study} initial={null} studyId={studyId} studyPicker={picker} />
       <DraftList />
     </Page>
   );
+}
+
+/* ---------- Check an existing post (NRC-41) ---------- */
+
+const CHECK_GATED = 'Checking a post the client already made, without generating anything, is being built and will be available soon.';
+
+function NewCheck() {
+  const available = useValidationOnlyAvailable();
+  return (
+    <Page>
+      <EntryChoice value="check" />
+      {available ? <NewClientPost /> : <Card><InDevelopment feature="Check an existing post" description={CHECK_GATED} /></Card>}
+    </Page>
+  );
+}
+
+function CheckedPost() {
+  const available = useValidationOnlyAvailable();
+  if (!available) return <Page><Card><InDevelopment feature="Check an existing post" description={CHECK_GATED} /></Card></Page>;
+  return <ClientPostPage />;
 }
 
 /* ---------- Existing draft ---------- */
@@ -146,16 +172,17 @@ function Page({ children, crumbs }: { children: React.ReactNode; crumbs?: boolea
 }
 
 function DraftList() {
+  const draftListInDev = useInDevelopment('draftList');
   const { context } = useSession();
   const q = useQuery({
     queryKey: ['creatives', context.tenant.tenant_id],
     queryFn: ({ signal }) => creativesApi.list(signal),
     // The backend has no draft list yet (config/inDevelopment.ts): do not call it.
-    enabled: !IN_DEVELOPMENT.draftList,
+    enabled: !draftListInDev,
   });
   const studyName = (id: string) => context.studies.find((s) => s.study_id === id)?.study_title ?? 'Study not available';
 
-  if (IN_DEVELOPMENT.draftList) {
+  if (draftListInDev) {
     return (
       <Card>
         <CardHead title="Your drafts" />

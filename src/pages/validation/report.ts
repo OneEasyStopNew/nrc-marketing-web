@@ -93,6 +93,7 @@ const RULE_RESULT_LABEL: Record<RuleResultValue, string> = {
   FAIL: 'Fail',
   NOT_APPLICABLE: 'Not applicable',
   UNABLE_TO_ASSESS: 'Unable to assess',
+  NEEDS_REVIEW: 'Needs review',
 };
 
 const SEVERITY_LABEL: Record<Severity, string> = {

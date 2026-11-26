@@ -25,13 +25,13 @@ import { imageAltForBrief } from '@/components/media/imageAlt';
 import { fmtDateTime } from '@/lib/utils';
 import { PostPreview } from '@/pages/create/parts';
 import { useApprovals, useWorkspaceMutation } from '@/pages/shared/queries';
-import { InDevelopment, QueryState, ReviewBadge, ValidationBadge } from '@/pages/shared/ui';
-import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment, QueryState, ReviewBadge, ValidationBadge, useInDevelopment } from '@/pages/shared/ui';
 
 /** /marketing/approvals (queue) and /marketing/approvals/:id (one review). */
 export default function ApprovalsPage(): ReactElement {
+  const approvalsInDev = useInDevelopment('approvals');
   // Formal approvals are outside the current demo (config/inDevelopment.ts).
-  if (IN_DEVELOPMENT.approvals) {
+  if (approvalsInDev) {
     return (
       <VStack gap={8}>
         <PageHeader title="Approvals" description="Review posts before they can be published. Approval binds to the exact version you see." />

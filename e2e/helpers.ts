@@ -1,5 +1,14 @@
 import type { Page, TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { IN_DEVELOPMENT } from '../src/config/inDevelopment';
+
+/**
+ * The in-development flags as the e2e tests see them. The tests run in
+ * simulation, which shows every built feature (useInDevelopment in
+ * pages/shared/ui.tsx), so none is hidden there. Real builds still hide
+ * what config/inDevelopment.ts marks.
+ */
+export const IN_DEVELOPMENT_IN_SIM = Object.fromEntries(Object.keys(IN_DEVELOPMENT).map((k) => [k, false])) as Record<keyof typeof IN_DEVELOPMENT, boolean>;
 
 /**
  * Simulation sign-in: open a (deep) link while signed out, pick a fixture
@@ -111,6 +120,13 @@ export async function auditLayout(page: Page, testInfo: TestInfo, name: string):
       const b = boxes[i];
       if (b.width >= 24 && b.height >= 24) return;
       const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+      // A target scrolled out of its own scroll region (e.g. one column of a two-column page) is not
+      // on screen there, whatever sits at that point instead; it is judged once it is scrolled into view.
+      for (let a = t.parentElement; a; a = a.parentElement) {
+        if (getComputedStyle(a).overflowY === 'visible') continue;
+        const r = a.getBoundingClientRect();
+        if (cy < r.top || cy > r.bottom || cx < r.left || cx > r.right) return;
+      }
       // A target scrolled under a sticky footer or header cannot be hit there; it is judged once it is in view.
       const top = document.elementFromPoint(cx, cy);
       if (top && !t.contains(top) && !top.contains(t)) return;

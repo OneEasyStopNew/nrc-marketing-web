@@ -76,6 +76,8 @@ test('an edit autosaves a new version and makes the old validation out of date a
   await expect(status(page)).toHaveText('Saved · version 3');
   await expect(seen(page, 'Passed the assessed checks')).toBeVisible();
   // The brief of this version passed, so the server allows generation (the draft already has an image).
+  // NRC-21: the text question is answered first.
+  await page.getByRole('radio', { name: 'No', exact: true }).check();
   await expect(page.getByRole('button', { name: 'Generate a new image' })).toBeEnabled();
 
   await caption(page).press('Control+End');

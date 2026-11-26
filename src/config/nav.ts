@@ -25,6 +25,8 @@ export const NAV: NavItem[] = [
   { name: 'Approvals', href: '/marketing/approvals', icon: 'check', capability: 'approval:decide', hint: 'Posts waiting for a reviewer decision' },
   { name: 'Publications', href: '/marketing/publications', icon: 'send', capability: 'publication:manage', hint: 'What was scheduled or published, and where' },
   { name: 'Connected accounts', href: '/marketing/integrations', icon: 'globe', capability: 'publication:manage', hint: 'Social accounts Marketing may post to' },
+  { name: 'Dashboards', href: '/marketing/insights', icon: 'chart', capability: 'creative:read', hint: 'Usage and cost, validation quality and social performance' },
+  { name: 'Usage and balance', href: '/marketing/usage', icon: 'dollar', capability: 'creative:read', hint: 'What AI generation cost and what the balance can still make' },
   { name: 'Team', href: '/marketing/team', icon: 'users', capability: 'membership:manage', hint: 'Who works in Marketing and their roles' },
 ];
 

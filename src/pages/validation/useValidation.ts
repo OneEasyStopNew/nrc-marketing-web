@@ -4,9 +4,10 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
 import type { Creative } from '@/api/creatives';
 import { isApiError } from '@/api/errors';
-import { isTerminal, newValidationKey, validationsApi, type ValidationInputKind, type ValidationRun } from '@/api/validations';
+import { isTerminal, newValidationKey, validationsApi, type ValidationContext, type ValidationInputKind, type ValidationRun } from '@/api/validations';
 import { useToast } from '@/components/ui/Toast';
 import { rememberRun } from './knownRuns';
+import { startFailure } from './startFailure';
 
 const FIRST_POLL_MS = 1000;
 const MAX_POLL_MS = 10_000;
@@ -34,6 +35,23 @@ export function useValidationRun(runId: string | null | undefined): UseQueryResu
     },
     retry: (count, e) => !(isApiError(e) && !e.retryable) && count < 2,
     staleTime: 0,
+  });
+}
+
+/**
+ * The policy context a finished brief or caption run was checked against
+ * (NRC-5); null when the run stored none. Read once: a stored context never
+ * changes, and an image run has none to read.
+ */
+export function useValidationContext(runId: string | null | undefined, enabled: boolean): UseQueryResult<ValidationContext | null> {
+  const { context } = useSession();
+  return useQuery({
+    queryKey: ['validation-context', context.tenant.tenant_id, runId],
+    // enabled guarantees runId is set when this runs.
+    queryFn: ({ signal }) => validationsApi.context(runId!, signal),
+    enabled: !!runId && enabled,
+    retry: (count, e) => !(isApiError(e) && !e.retryable) && count < 2,
+    staleTime: Infinity,
   });
 }
 
@@ -71,10 +89,8 @@ export function useStartValidation(): StartValidation {
       navigate(`/marketing/validation/${encodeURIComponent(creative.id)}/${encodeURIComponent(accepted.validation_run_id)}`);
     } catch (e) {
       if (!isApiError(e)) throw e;
-      if (e.kind === 'not_implemented') toast('Validation is not available yet', 'waiting', 'The checking service is not connected in this build.');
-      else if (e.code === 'VERSION_CONFLICT') toast('The draft changed', 'waiting', 'Reload the draft and validate the latest version.');
-      else if (e.kind === 'forbidden') toast('Your role cannot run validation here', 'blocked');
-      else toast('Validation could not start', 'blocked', e.retryable ? 'Try again in a moment.' : e.message);
+      const failure = startFailure(e);
+      toast(failure.title, failure.tone, failure.detail);
       if (!e.retryable) pending.current = null;
     } finally {
       setStartingKind(null);

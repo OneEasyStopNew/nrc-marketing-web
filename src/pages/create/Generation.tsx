@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { Text } from '@astryxdesign/core/Text';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
@@ -10,7 +10,11 @@ import { failureText, JOB_STEPS, jobProgress, type Job } from '@/api/jobs';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Alert, ProgressBar } from '@/components/ui/Misc';
+import type { RequestProblem } from '@/api/generationModels';
+import type { ImageChoice } from '@/api/jobs';
+import { useInDevelopment } from '@/pages/shared/ui';
 import { generationAnnouncement } from './generationRules';
+import { EMPTY_CHOICE, ModelChoice, choiceToRequest, useGenerationModels } from './ModelChoice';
 
 /**
  * Step 4 of the composer: generate the image for the current version.
@@ -19,7 +23,7 @@ import { generationAnnouncement } from './generationRules';
  * a passed badge from an earlier version never enables it. Generation
  * finishing says nothing about validation or approval of the image.
  */
-export function GenerationStep({ creative, editing, canGenerate, eligibility, job, active, unsettled, pollingStopped, checking, onCheckAgain, starting, onGenerate, image }: {
+export function GenerationStep({ creative, editing, canGenerate, eligibility, job, active, unsettled, pollingStopped, checking, onCheckAgain, starting, onGenerate, image, requestProblem, onChoiceChange }: {
   creative: Creative;
   /** Unsaved or saving edits: the saved version is about to change. */
   editing: boolean;
@@ -36,9 +40,17 @@ export function GenerationStep({ creative, editing, canGenerate, eligibility, jo
   checking: boolean;
   onCheckAgain: () => void;
   starting: boolean;
-  onGenerate: () => void;
+  /** Starts a job; choice is the model and image text when model choice is on (NRC-21). */
+  onGenerate: (choice?: ImageChoice) => void;
   image: Asset | undefined;
+  /** Why the last start was refused, for the field it is about. */
+  requestProblem?: RequestProblem | null;
+  onChoiceChange?: () => void;
 }): ReactElement {
+  const modelChoice = !useInDevelopment('modelChoice');
+  const models = useGenerationModels(modelChoice);
+  const [choice, setChoice] = useState(EMPTY_CHOICE);
+  const request = modelChoice ? choiceToRequest(choice, models.data) : undefined;
   const e = eligibility.data;
   const notConnected = isApiError(eligibility.error) && eligibility.error.kind === 'not_implemented';
   const why = editing
@@ -110,10 +122,15 @@ export function GenerationStep({ creative, editing, canGenerate, eligibility, jo
 
       {!active && !unsettled && <Text type="body" color="secondary">{image && eligible ? 'Editing the brief does not change this image. Generate again if it should match a new brief.' : why}</Text>}
 
+      {canGenerate && modelChoice && eligible && (
+        <ModelChoice value={choice} brief={creative.current_prompt} problem={requestProblem ?? null} disabled={active || unsettled || starting}
+          onChange={(v) => { setChoice(v); onChoiceChange?.(); }} />
+      )}
+
       {canGenerate && (
         <HStack>
           <Button variant={image ? 'secondary' : 'primary'} icon="img" loading={starting}
-            disabled={!eligible || active || unsettled} onClick={onGenerate}>
+            disabled={!eligible || active || unsettled || request === null} onClick={() => onGenerate(request ?? undefined)}>
             {image ? 'Generate a new image' : 'Generate image'}
           </Button>
         </HStack>

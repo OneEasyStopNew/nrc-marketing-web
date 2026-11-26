@@ -13,7 +13,7 @@ import { ruleLookup, useActivePolicy } from '@/api/policy';
 import { AspectRatio } from '@astryxdesign/core/AspectRatio';
 import { isApiError } from '@/api/errors';
 import { http } from '@/api/http';
-import { isInProgress } from '@/api/validations';
+import { isInProgress, type ValidationInputKind } from '@/api/validations';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Alert, EmptyState, PageHeader, SkeletonRows, TwoColumn } from '@/components/ui/Misc';
@@ -25,10 +25,14 @@ import { Text } from '@astryxdesign/core/Text';
 import type { DraftSummary } from '@/api/workspace';
 import { Tabs } from '@/components/ui/Misc';
 import { useDrafts } from '@/pages/shared/queries';
-import { InDevelopment, QueryState, ReviewBadge, StatCard, ValidationBadge, relTime } from '@/pages/shared/ui';
-import { IN_DEVELOPMENT } from '@/config/inDevelopment';
+import { InDevelopment, QueryState, ReviewBadge, StatCard, ValidationBadge, relTime, useInDevelopment } from '@/pages/shared/ui';
 import { EvidenceText, FindingsList, findingKey, KIND_WORD, regionWords, RunSummary, Verdict } from './parts';
-import { useStartValidation, useValidationRun } from './useValidation';
+import { evidencePanel } from './evidence';
+import { PolicyEvidence } from './PolicyEvidence';
+import { useStartValidation, useValidationContext, useValidationRun } from './useValidation';
+
+/** The way back to the draft names what was checked. */
+const REVISE_LABEL: Record<ValidationInputKind, string> = { brief: 'Revise the brief', text: 'Revise the caption', image: 'Back to the draft' };
 
 /** /marketing/validation (how to start) and /marketing/validation/:creativeId/:runId (one run's results). */
 export default function ValidationPage(): ReactElement {
@@ -49,8 +53,9 @@ type ValidationFilter = (typeof VALIDATION_FILTERS)[number]['id'];
 const NEEDS_ATTENTION = new Set<DraftSummary['validation']>(['FAIL', 'NEEDS_REVIEW', 'STALE', 'NOT_RUN', 'RUNNING']);
 
 function Start() {
+  const draftListInDev = useInDevelopment('draftList');
   // The backend has no draft list yet (config/inDevelopment.ts): do not call it.
-  const drafts = useDrafts(!IN_DEVELOPMENT.draftList);
+  const drafts = useDrafts(!draftListInDev);
   const [filter, setFilter] = useState<ValidationFilter>('attention');
   const all = drafts.data ?? [];
   const pick = (f: ValidationFilter) => all.filter((d) => f === 'all' || (f === 'passed' ? d.validation === 'PASS' : NEEDS_ATTENTION.has(d.validation)));
@@ -59,7 +64,7 @@ function Start() {
   const now = useNow();
   const columns = useMemo(() => validationColumns(now), [now]);
 
-  if (IN_DEVELOPMENT.draftList) {
+  if (draftListInDev) {
     return (
       <VStack gap={6}>
         <PageHeader title="Validation" description="Automated checks of a brief against the approved study facts and the policy rules, with the evidence for each finding." />
@@ -145,6 +150,11 @@ function Workspace() {
   const finished = r ? !isInProgress(r.state) : false;
   useEffect(() => { if (finished) void draft.refetch(); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The rules and source text a finished brief or caption run was checked against (an image run stores none).
+  const hasEvidence = finished && r?.input_kind !== 'image';
+  const evidenceQuery = useValidationContext(runId, hasEvidence);
+  const evidence = evidencePanel(evidenceQuery);
+
   const [selected, setSelected] = useState<number | null>(null);
   useEffect(() => {
     if (selected == null) return;
@@ -202,7 +212,7 @@ function Workspace() {
       <PageHeader title="Validation results" crumbs={crumbs}
         actions={(
           <>
-            <Button variant="secondary" href={draftLink}>Revise the brief</Button>
+            <Button variant="secondary" href={draftLink}>{REVISE_LABEL[r.input_kind]}</Button>
             {canValidate && (stale || r.state === 'FAILED' || r.state === 'CANCELLED') && (
               <Button variant="primary" loading={starting} onClick={() => void start(creative, r.input_kind, r.asset_id)}>
                 Validate version {creative.version}
@@ -263,6 +273,24 @@ function Workspace() {
                 <List listStyle="disc" density="compact">
                   {r.coverage_gaps.map((g, i) => <ListItem key={i} label={g.reason} description={g.rule_id ?? undefined} />)}
                 </List>
+              </CardBody>
+            </Card>
+          )}
+          {hasEvidence && (
+            <Card>
+              <CardHead title="Policy evidence" icon="doc" regulatory />
+              <CardBody>
+                {evidence.kind === 'loading' && <SkeletonRows rows={3} />}
+                {evidence.kind === 'none' && <Text type="body" color="secondary">No policy evidence was stored for this run.</Text>}
+                {evidence.kind === 'failed' && (
+                  <Alert tone="waiting" title="The policy evidence could not be loaded"
+                    action={<Button variant="secondary" size="sm" icon="refresh" onClick={() => void evidenceQuery.refetch()}>Try again</Button>}>
+                    {evidence.message} The result above is not affected.
+                  </Alert>
+                )}
+                {evidence.kind === 'ready' && (
+                  <PolicyEvidence context={evidence.context} ruleTitle={(id, version) => ruleLookup(policy.data)(id, version)?.title} />
+                )}
               </CardBody>
             </Card>
           )}

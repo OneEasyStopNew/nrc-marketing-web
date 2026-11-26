@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '@/auth/AuthProvider';
-import { workspaceApi, type ActivityItem, type ApprovalRequest, type DraftSummary, type Member, type PolicyRule, type Publication, type SocialAccount } from '@/api/workspace';
+import { workspaceApi, type ActivityItem, type ApprovalRequest, type DraftSummary, type Member, type PolicyRule, type Publication, type SocialAccount, type SocialSet } from '@/api/workspace';
 
 /**
  * Data for the workspace sections and dashboards. Every key starts with the
@@ -28,7 +28,11 @@ export const useAccounts = (enabled = true): UseQueryResult<SocialAccount[]> => 
   const t = useTenant();
   return useQuery({ queryKey: ['ws', t, 'accounts'], queryFn: ({ signal }) => workspaceApi.accounts(signal), enabled });
 };
-export const usePublications = (enabled = true): UseQueryResult<Publication[]> => {
+export const useSocialSets = (enabled = true): UseQueryResult<SocialSet[]> => {
+  const t = useTenant();
+  return useQuery({ queryKey: ['ws', t, 'social-sets'], queryFn: ({ signal }) => workspaceApi.socialSets(signal), enabled });
+};
+export const usePublications =(enabled = true): UseQueryResult<Publication[]> => {
   const t = useTenant();
   return useQuery({ queryKey: ['ws', t, 'publications'], queryFn: ({ signal }) => workspaceApi.publications(signal), enabled });
 };

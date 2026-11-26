@@ -1,6 +1,8 @@
+import { z } from 'zod';
 import { ApiError } from './errors';
 import { http, requestWithMeta } from './http';
 import * as S from './schemas.gen';
+import { ChannelOption } from './session';
 
 /**
  * Validation runs (NRC-7 text, NRC-8 image), per contracts/openapi.json.
@@ -9,12 +11,26 @@ import * as S from './schemas.gen';
  * failed) is separate from the policy outcome (PASS, FAIL, NEEDS_REVIEW).
  */
 
-export type ValidationRun = S.ValidationRunRead;
+/**
+ * A finding may carry the exact words to put in place of the flagged span
+ * (replacement_text, proposed for the correction service, NRC-11).
+ * suggested_correction stays advice; only replacement_text is ever applied.
+ */
+const FindingWithFix = S.Finding.extend({ replacement_text: z.string().nullable().optional() });
+const RunWithFixes = S.ValidationRunRead.extend({ findings: z.array(FindingWithFix) });
+
+export type ValidationRun = z.infer<typeof RunWithFixes>;
 export type ValidationAccepted = S.ValidationAccepted;
+/** ValidationContextRead, with the channels drafts may already use (see session.ts). */
+const ContextSchema = S.ValidationContextRead.extend({ channel: ChannelOption });
+export type ValidationContext = z.infer<typeof ContextSchema>;
+export type ContextRule = S.ContextRuleRead;
+export type ContextEvidence = S.ContextEvidenceRead;
+export type MissingContext = S.MissingContextRead;
 export type ValidationInputKind = S.ValidationInputKind;
 /** Closed: a state the contract does not list fails as CONTRACT_MISMATCH instead of being taken as finished. */
 export type ExecutionState = S.ExecutionState;
-export type Finding = S.Finding;
+export type Finding = z.infer<typeof FindingWithFix>;
 export type Gate = S.Gate;
 export type Outcome = S.Outcome;
 export type RuleResult = S.RuleResult;
@@ -45,9 +61,28 @@ export const validationsApi = {
   get: async (runId: string, signal?: AbortSignal): Promise<ValidationRun> => {
     if (!isSafeId(runId)) throw new ApiError(404);
     const timeout = AbortSignal.timeout(VALIDATION_READ_TIMEOUT_MS);
-    return http.get(`/validations/${encodeURIComponent(runId)}`, S.ValidationRunRead, {
+    return http.get(`/validations/${encodeURIComponent(runId)}`, RunWithFixes, {
       signal: AbortSignal.any(signal ? [signal, timeout] : [timeout]),
     });
+  },
+
+  /**
+   * The policy context a brief or caption run was checked against (NRC-5):
+   * the rules selected for it, their source text, and what retrieval could
+   * not settle. Null when the run stored none (404 CONTEXT_NOT_AVAILABLE:
+   * older runs, image runs, or context that could not be gathered).
+   */
+  context: async (runId: string, signal?: AbortSignal): Promise<ValidationContext | null> => {
+    if (!isSafeId(runId)) throw new ApiError(404);
+    const timeout = AbortSignal.timeout(VALIDATION_READ_TIMEOUT_MS);
+    try {
+      return await http.get(`/validations/${encodeURIComponent(runId)}/context`, ContextSchema, {
+        signal: AbortSignal.any(signal ? [signal, timeout] : [timeout]),
+      });
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'CONTEXT_NOT_AVAILABLE') return null;
+      throw e;
+    }
   },
 };
 

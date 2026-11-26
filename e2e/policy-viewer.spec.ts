@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { IN_DEVELOPMENT } from '../src/config/inDevelopment';
+import { IN_DEVELOPMENT_IN_SIM as IN_DEVELOPMENT } from './helpers';
 import { lightTheme, openNav, seen, signInAt } from './helpers';
 
 /**

@@ -14,6 +14,7 @@ import { Alert, EmptyState, SkeletonRows } from '@/components/ui/Misc';
 import { InDevelopmentAnimation } from '@/components/ui/InDevelopmentAnimation';
 import { Modal } from '@/components/ui/Overlay';
 import { SIMULATION_BUILD } from '@/config/env';
+import { IN_DEVELOPMENT } from '@/config/inDevelopment';
 import { useAuth } from '@/auth/AuthProvider';
 import { UI_LOCALE } from '@/lib/utils';
 
@@ -37,7 +38,7 @@ export const ReviewBadge = badge({
 export const PublicationBadge = badge({
   SCHEDULED: ['brand', 'Scheduled'], QUEUED: ['brand', 'Queued'], PROCESSING: ['brand', 'Sending'], PUBLISHED: ['done', 'Published'],
   PARTIAL: ['waiting', 'Partly published'], FAILED: ['blocked', 'Failed'], BLOCKED: ['blocked', 'Blocked'], CANCELLED: ['neutral', 'Cancelled'],
-  UNKNOWN: ['waiting', 'Not confirmed'],
+  UNKNOWN: ['waiting', 'Not confirmed'], MANUAL: ['neutral', 'Post by hand'],
 } satisfies Record<PublicationState, [BadgeVariant, string]>);
 
 export const MediaBadge = badge({
@@ -134,6 +135,16 @@ export function SectionTitle({ title, description, actions }: { title: string; d
 export function useIsSimulation(): boolean {
   const { mode } = useAuth();
   return SIMULATION_BUILD && mode === 'simulation';
+}
+
+/**
+ * Whether a feature is still hidden as in development. Real builds follow
+ * config/inDevelopment.ts; the simulation shows every built feature, so its
+ * screens can be built and reviewed against dummy data before the API exists.
+ */
+export function useInDevelopment(feature: keyof typeof IN_DEVELOPMENT): boolean {
+  const sim = useIsSimulation();
+  return IN_DEVELOPMENT[feature] && !sim;
 }
 
 /** Simulation data must never pass for live evidence. Renders nothing in a real build. */

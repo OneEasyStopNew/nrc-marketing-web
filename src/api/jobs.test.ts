@@ -154,6 +154,13 @@ describe('jobsApi', () => {
     expect((await jobsApi.get(JOB_ID)).state).toBe('UNKNOWN');
   });
 
+  it('keeps a job whose stage this build does not know instead of failing', async () => {
+    configureHttp({ fetch: fakeFetch(() => json(200, jobBody({ stage: 'upscaling' }))) });
+    const job = await jobsApi.get(JOB_ID);
+    expect(job.stage).toBe('upscaling');
+    expect(jobProgress(job).step).toBe(1);
+  });
+
   it('refuses a job body whose id is not a UUID', async () => {
     configureHttp({ fetch: fakeFetch(() => json(200, jobBody({ job_id: '../admin' }))) });
     await expect(jobsApi.get(JOB_ID)).rejects.toMatchObject({ kind: 'contract' });

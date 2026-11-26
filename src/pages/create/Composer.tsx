@@ -27,6 +27,7 @@ import {
 import { useDraftEditor } from './useDraftEditor';
 import { FindingsToFix, VersionHistory } from './revisions';
 import { GenerationStep } from './Generation';
+import { PostCost } from '@/pages/usage/PostCost';
 import { useDraftChecks, useGeneration } from './useDraftChecks';
 import { useStartValidation } from '@/pages/validation/useValidation';
 
@@ -199,7 +200,13 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
               limit={CAPTION_MAX} error={ed.errors.caption}
               onChange={(e) => ed.setField('caption', e.target.value)} />
             {study && <RequiredWording texts={study.facts.required_disclosures} />}
-            {creative && !disabled && <FindingsToFix creative={creative} editing={ed.dirty} />}
+            {creative && !disabled && (
+              <FindingsToFix creative={creative} editing={ed.dirty}
+                onApply={(field, next) => {
+                  ed.setField(field, next);
+                  toast(`Suggested wording put in the ${field === 'prompt' ? 'brief' : 'caption'}`, 'done', 'It saves as a new version. Validate that version before generating.');
+                }} />
+            )}
           </VStack>
         </Step>
 
@@ -208,7 +215,8 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
             ? <GenerationStep creative={creative} editing={editing} canGenerate={can('generation:run') && !disabled}
                 eligibility={eligibility} job={gen.job} active={gen.active} unsettled={gen.unsettled}
                 pollingStopped={gen.pollingStopped} checking={gen.checking} onCheckAgain={gen.checkAgain}
-                starting={gen.starting} onGenerate={() => void gen.start()} image={asset.data} />
+                starting={gen.starting} onGenerate={(choice) => void gen.start(choice)} image={asset.data}
+                requestProblem={gen.requestProblem} onChoiceChange={gen.clearRequestProblem} />
             : <Text type="body" color="secondary">The image is generated from the brief after the draft is created and the brief passes validation.</Text>}
         </Step>
 
@@ -260,6 +268,7 @@ export function Composer({ study, initial, readOnly, readOnlyReason, studyPicker
               requestAnimationFrame(() => promptRef.current?.focus());
             }} />
         )}
+        {creative && <PostCost creativeId={creative.id} />}
         {SIMULATION_BUILD && mode === 'simulation' && creative && !disabled && (
           <Card>
             <CardHead title="Simulation tools" icon="warn" />

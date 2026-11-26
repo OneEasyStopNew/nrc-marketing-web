@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { lightTheme, navOf, openNav, seen, settle, signInAt } from './helpers';
-import { IN_DEVELOPMENT } from '../src/config/inDevelopment';
+import { IN_DEVELOPMENT_IN_SIM as IN_DEVELOPMENT } from './helpers';
 
 /**
  * Role dashboards and the workspace pages (approvals, publications, rules,
@@ -93,13 +93,15 @@ test('a publisher queues an approved post; it is never shown as published', asyn
 
   await dialog.getByRole('button', { name: 'Schedule post' }).click();
   await expect(seen(page, 'Choose an approved version.')).toBeVisible();
-  await expect(seen(page, 'Choose at least one account.')).toBeVisible();
+  await expect(seen(page, 'Choose a social set.')).toBeVisible();
 
   await dialog.getByRole('combobox', { name: /Approved version/ }).click();
   await page.getByRole('option', { name: /sim-cr-0001 · version 3/ }).click();
+  await dialog.getByRole('combobox', { name: /Social set/ }).click();
+  await page.getByRole('option', { name: /NRC US/ }).click();
   // Accounts that cannot publish are not selectable.
   await expect(dialog.getByRole('checkbox', { name: /NRC Community/ })).toBeDisabled();
-  await dialog.getByRole('checkbox', { name: /nrc_research_sim/ }).check();
+  await dialog.getByRole('checkbox', { name: /^nrc_research_sim$/ }).check();
   await dialog.getByRole('radio', { name: 'As soon as possible' }).check();
   await dialog.getByRole('button', { name: 'Queue post' }).click();
   await expect(seen(page, 'Post queued')).toBeVisible();

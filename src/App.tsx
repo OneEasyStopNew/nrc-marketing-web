@@ -25,6 +25,8 @@ const ApprovalsPage = lazy(() => import('@/pages/approvals/ApprovalsPage'));
 const PublicationsPage = lazy(() => import('@/pages/publications/PublicationsPage'));
 const AccountsPage = lazy(() => import('@/pages/accounts/AccountsPage'));
 const TeamPage = lazy(() => import('@/pages/team/TeamPage'));
+const UsagePage = lazy(() => import('@/pages/usage/UsagePage'));
+const DashboardsPage = lazy(() => import('@/pages/insights/DashboardsPage'));
 
 /** Sections whose page is built; the rest show the not-built-yet state until their ticket. */
 const PAGES: Record<string, React.ComponentType> = {
@@ -36,6 +38,8 @@ const PAGES: Record<string, React.ComponentType> = {
   '/marketing/publications': PublicationsPage,
   '/marketing/integrations': AccountsPage,
   '/marketing/team': TeamPage,
+  '/marketing/usage': UsagePage,
+  '/marketing/insights': DashboardsPage,
 };
 
 /** Route-level check. Menu visibility is not authorization; the API decides, this keeps the UI honest. */

@@ -156,14 +156,31 @@ export type ApprovalRequest = Row<typeof ApprovalRequestSchema>;
 
 export type Decision = 'APPROVE' | 'REQUEST_CHANGES' | 'REJECT';
 
-/* ---------- Social accounts (NRC-13) ---------- */
+/* ---------- Social sets and accounts (NRC-13, NRC-31; eight channels NRC-39) ---------- */
 
 export const AccountState = z.enum(['CONNECTED', 'PERMISSION_MISSING', 'PENDING_APP_REVIEW', 'EXPIRED', 'REVOKED', 'TEST_ONLY']);
 export type AccountState = z.infer<typeof AccountState>;
-const SocialChannel = z.enum(['facebook', 'instagram']);
+/** The eight networks NRC-39 covers. What each account can do comes from the backend, never from this list. */
+export const SocialChannel = z.enum(['facebook', 'instagram', 'threads', 'tiktok', 'linkedin', 'youtube', 'pinterest', 'snapchat']);
+export type SocialChannel = z.infer<typeof SocialChannel>;
+/** Details a network needs before it accepts a post (proposed). */
+export const RequiredField = z.enum(['title', 'privacy', 'ai_disclosure']);
+export type RequiredField = z.infer<typeof RequiredField>;
+
+/** A brand or region group of accounts, with who may use it and how many accounts it may hold (proposed, NRC-31). */
+const SocialSetSchema = z.object({
+  social_set_id: z.string(),
+  name: z.string(),
+  region: z.string(),
+  account_limit: z.number().int(),
+  account_count: z.number().int(),
+  access_groups: z.array(z.string()),
+});
+export type SocialSet = Row<typeof SocialSetSchema>;
 
 const SocialAccountSchema = z.object({
   account_id: z.string(),
+  social_set_id: z.string(),
   channel: SocialChannel,
   name: z.string(),
   handle: z.string(),
@@ -173,13 +190,21 @@ const SocialAccountSchema = z.object({
   connected_by: z.string(),
   connected_at: isoDateTime,
   expires_at: isoDateTime.nullable(),
+  /** Formats this account can post now, e.g. "Feed image", "Reel", "Short", "Pin". */
   formats: z.array(z.string()),
+  /** Longest caption the network accepts, in characters; null when it has no caption. */
+  caption_max: z.number().int().nullable(),
+  /** API: the backend posts it. MANUAL: no publishing API, so the post is handed off to post by hand. */
+  publish_mode: z.enum(['API', 'MANUAL']),
+  /** Details this network needs with each post. */
+  required_fields: z.array(RequiredField),
 });
 export type SocialAccount = Row<typeof SocialAccountSchema>;
 
 /* ---------- Publications (NRC-14 / NRC-15) ---------- */
 
-export const PublicationState = z.enum(['SCHEDULED', 'QUEUED', 'PROCESSING', 'PUBLISHED', 'PARTIAL', 'FAILED', 'BLOCKED', 'CANCELLED', 'UNKNOWN']);
+/** MANUAL: handed off to post by hand; never shown as published. */
+export const PublicationState = z.enum(['SCHEDULED', 'QUEUED', 'PROCESSING', 'PUBLISHED', 'PARTIAL', 'FAILED', 'BLOCKED', 'CANCELLED', 'UNKNOWN', 'MANUAL']);
 export type PublicationState = z.infer<typeof PublicationState>;
 
 const PublicationSchema = z.object({
@@ -188,7 +213,8 @@ const PublicationSchema = z.object({
   creative_version: z.number().int(),
   study_title: z.string().transform(stagingLabel),
   caption: z.string(),
-  publish_at: isoDateTime.nullable(),
+  /** Wall time in `timezone` ("2026-11-12T09:00"), no offset: the backend resolves it, so daylight-saving changes stay right. */
+  publish_at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/).nullable(),
   timezone: z.string(),
   state: PublicationState,
   state_reason: z.string().nullable(),
@@ -198,6 +224,8 @@ const PublicationSchema = z.object({
     account_id: z.string(),
     channel: SocialChannel,
     account_name: z.string(),
+    /** The format this account receives. */
+    format: z.string(),
     state: PublicationState,
     permalink: z.string().nullable(),
     error: z.string().nullable(),
@@ -205,10 +233,19 @@ const PublicationSchema = z.object({
 });
 export type Publication = Row<typeof PublicationSchema>;
 
+/** What one account receives, with the details its network needs. */
+export interface PublicationTarget {
+  account_id: string;
+  format: string;
+  title?: string;
+  privacy?: 'public' | 'followers' | 'private';
+  ai_disclosure?: boolean;
+}
+
 export interface PublicationRequest {
   creative_id: string;
   creative_version: number;
-  account_ids: string[];
+  targets: PublicationTarget[];
   /** null = publish now. Local wall time; the backend resolves it in `timezone`. */
   publish_at: string | null;
   timezone: string;
@@ -258,12 +295,14 @@ export interface WorkspaceApi {
   approval(id: string, signal?: AbortSignal): Promise<ApprovalRequest>;
   decide(id: string, version: number, decision: Decision, reason: string): Promise<ApprovalRequest>;
   accounts(signal?: AbortSignal): Promise<SocialAccount[]>;
-  connectAccount(channel: SocialAccount['channel'], name: string): Promise<SocialAccount>;
+  socialSets(signal?: AbortSignal): Promise<SocialSet[]>;
+  connectAccount(channel: SocialAccount['channel'], name: string, socialSetId: string): Promise<SocialAccount>;
   reconnectAccount(id: string): Promise<SocialAccount>;
   disconnectAccount(id: string): Promise<void>;
   publications(signal?: AbortSignal): Promise<Publication[]>;
   schedule(body: PublicationRequest): Promise<Publication>;
   cancelPublication(id: string): Promise<Publication>;
+  reschedule(id: string, publishAt: string, timezone: string): Promise<Publication>;
   members(signal?: AbortSignal): Promise<Member[]>;
   invite(body: { name: string; email: string; roles: Member['roles'] }): Promise<Member>;
   updateRoles(id: string, roles: Member['roles']): Promise<Member>;
@@ -291,14 +330,17 @@ export const workspaceApi: WorkspaceApi = {
     })).data,
 
   accounts: (signal) => http.get('/accounts', z.array(SocialAccountSchema), { signal }),
-  connectAccount: async (channel, name) =>
-    (await requestWithMeta('POST', '/accounts', SocialAccountSchema, { body: { channel, name }, idempotencyKey: newKey('account') })).data,
+  socialSets: (signal) => http.get('/social-sets', z.array(SocialSetSchema), { signal }),
+  connectAccount: async (channel, name, socialSetId) =>
+    (await requestWithMeta('POST', '/accounts', SocialAccountSchema, { body: { channel, name, social_set_id: socialSetId }, idempotencyKey: newKey('account') })).data,
   reconnectAccount: (accountId) => http.post(`/accounts/${id(accountId)}/reconnect`, SocialAccountSchema),
   disconnectAccount: async (accountId) => { await http.del(`/accounts/${id(accountId)}`, NoContent); },
 
   publications: (signal) => http.get('/publications', z.array(PublicationSchema), { signal }),
   schedule: async (body) => (await requestWithMeta('POST', '/publications', PublicationSchema, { body, idempotencyKey: newKey('publish') })).data,
   cancelPublication: (publicationId) => http.post(`/publications/${id(publicationId)}/cancel`, PublicationSchema),
+  reschedule: (publicationId, publishAt, timezone) =>
+    http.post(`/publications/${id(publicationId)}/reschedule`, PublicationSchema, { publish_at: publishAt, timezone }),
 
   members: (signal) => http.get('/members', z.array(MemberSchema), { signal }),
   invite: async (body) => (await requestWithMeta('POST', '/members', MemberSchema, { body, idempotencyKey: newKey('invite') })).data,

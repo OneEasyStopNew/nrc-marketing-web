@@ -2,14 +2,40 @@
 // (NRC Marketing API 0.1.0). Do not edit by hand: run `npm run gen:api`.
 import { z } from 'zod';
 
+export const Applicability = z.enum(["true", "false", "unresolved"]);
+export type Applicability = z.infer<typeof Applicability>;
+
 export const AssetOrigin = z.enum(["generated", "uploaded"]);
 export type AssetOrigin = z.infer<typeof AssetOrigin>;
 
-/** Immutable stored bytes: any change produces a new asset_id and needs new validation. */
+export const IdentifiablePerson = z.enum(["yes", "no", "unknown"]);
+export type IdentifiablePerson = z.infer<typeof IdentifiablePerson>;
+
+export const Channel = z.enum(["facebook"]);
+export type Channel = z.infer<typeof Channel>;
+
+/** Whether media authorization is on record. None of these means it was verified. */
+export const AuthorizationStatus = z.enum(["NO_PERSON_DECLARED", "MISSING", "RECORDED", "EXPIRED"]);
+export type AuthorizationStatus = z.infer<typeof AuthorizationStatus>;
+
+/** Read by the approval and publication gates (NRC-12, NRC-14). Missing or expired authorization for a file with an identifiable person blocks them. */
+export const MediaAuthorization = z.object({
+  identifiable_person: IdentifiablePerson,
+  usage_authorization_ref: z.string().nullable(),
+  permitted_channels: z.array(Channel),
+  expires_at: z.iso.datetime({ offset: true }).nullable(),
+  status: AuthorizationStatus,
+});
+export type MediaAuthorization = z.infer<typeof MediaAuthorization>;
+
+/** Immutable stored bytes: any change produces a new asset_id and needs new validation. Uploads appear here only once they passed inspection (READY). */
 export const AssetRead = z.object({
   asset_id: z.string(),
-  creative_id: z.string(),
+  creative_id: z.string().nullable(),
   origin: AssetOrigin,
+  study_id: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
+  authorization: MediaAuthorization.nullable().optional(),
   mime_type: z.string(),
   width_px: z.number().int(),
   height_px: z.number().int(),
@@ -23,13 +49,132 @@ export const AssetRead = z.object({
 });
 export type AssetRead = z.infer<typeof AssetRead>;
 
-export const Capability = z.enum(["creative:read", "creative:write", "validation:run", "generation:run", "approval:decide", "policy:manage", "publication:manage", "membership:manage"]);
+export const BundleCreate = z.object({
+  name: z.string().min(1).max(200),
+  source_ref: z.string().min(1).max(300),
+  is_synthetic: z.boolean(),
+  based_on_bundle_id: z.string().nullable().optional(),
+});
+export type BundleCreate = z.infer<typeof BundleCreate>;
+
+/** Where a policy bundle is in its NRC-4 lifecycle. Only ACTIVE bundles validate content. */
+export const BundleLifecycleState = z.enum(["DRAFT", "REVIEW", "APPROVED", "BUILDING", "READY", "ACTIVE", "REJECTED", "RETIRED"]);
+export type BundleLifecycleState = z.infer<typeof BundleLifecycleState>;
+
+export const Gate = z.enum(["completeness", "study_facts", "policy", "media"]);
+export type Gate = z.infer<typeof Gate>;
+
+export const Severity = z.enum(["critical", "major", "minor"]);
+export type Severity = z.infer<typeof Severity>;
+
+/** What makes the final decision for a rule: code alone, or the model after a phrase check. */
+export const CheckType = z.enum(["deterministic", "semantic"]);
+export type CheckType = z.infer<typeof CheckType>;
+
+/** When a rule or exception applies. An empty list means no restriction on that dimension. The values are the policy's own tags, so they may name channels or languages the API doesn't offer yet; that's why they are strings, not the API's enums. */
+export const RuleApplicabilityRead = z.object({
+  input_kinds: z.array(z.string()),
+  channels: z.array(z.string()),
+  post_formats: z.array(z.string()),
+  languages: z.array(z.string()),
+  audiences: z.array(z.string()),
+  jurisdictions: z.array(z.string()),
+  study_specific: z.boolean(),
+  effective_from: z.iso.datetime({ offset: true }).nullable(),
+  effective_to: z.iso.datetime({ offset: true }).nullable(),
+});
+export type RuleApplicabilityRead = z.infer<typeof RuleApplicabilityRead>;
+
+export const PolicyLanguage = z.enum(["en", "es"]);
+export type PolicyLanguage = z.infer<typeof PolicyLanguage>;
+
+export const RuleSourceRead = z.object({
+  source_title: z.string(),
+  clause_ref: z.string(),
+  section: z.string().nullable(),
+  page: z.number().int().nullable(),
+  language: PolicyLanguage,
+  excerpt: z.string(),
+});
+export type RuleSourceRead = z.infer<typeof RuleSourceRead>;
+
+export const RuleTextRead = z.object({
+  node_key: z.string(),
+  language: PolicyLanguage,
+  text: z.string(),
+});
+export type RuleTextRead = z.infer<typeof RuleTextRead>;
+
+export const RuleExceptionRead = z.object({
+  node_key: z.string(),
+  language: PolicyLanguage,
+  text: z.string(),
+  requires_study_fact: z.string().nullable(),
+  applicability: RuleApplicabilityRead,
+});
+export type RuleExceptionRead = z.infer<typeof RuleExceptionRead>;
+
+export const BundleRuleRead = z.object({
+  rule_id: z.string(),
+  rule_version: z.number().int(),
+  title: z.string(),
+  requirement: z.string(),
+  gate: Gate,
+  severity: Severity,
+  mandatory: z.boolean(),
+  check_type: CheckType,
+  exact_wording: z.string().nullable(),
+  prohibited_phrases: z.array(z.string()),
+  applicability: RuleApplicabilityRead,
+  sources: z.array(RuleSourceRead),
+  disclosures: z.array(RuleTextRead),
+  interpretations: z.array(RuleTextRead),
+  examples: z.array(RuleTextRead),
+  exceptions: z.array(RuleExceptionRead),
+});
+export type BundleRuleRead = z.infer<typeof BundleRuleRead>;
+
+export const Capability = z.enum(["creative:read", "creative:write", "validation:run", "generation:run", "approval:decide", "policy:manage", "policy:approve", "policy:activate", "publication:manage", "membership:manage"]);
 export type Capability = z.infer<typeof Capability>;
 
-export const Channel = z.enum(["facebook"]);
-export type Channel = z.infer<typeof Channel>;
+export const CheckCode = z.enum(["EMPTY_BUNDLE", "UNREVIEWED_ITEM", "MISSING_PROVENANCE", "EDGE_TO_UNAPPROVED_NODE", "SUPERSEDES_CYCLE", "SUPERSEDES_CONFLICT", "CONTRADICTORY_WORDING", "UNRESOLVED_EXCEPTION", "UNSUPPORTED_LANGUAGE", "DUPLICATE_OBLIGATION", "EXACT_WORDING_NOT_IN_SOURCE", "INDEX_STALE"]);
+export type CheckCode = z.infer<typeof CheckCode>;
 
-export const Role = z.enum(["creator", "reviewer", "policy_admin", "publisher", "admin"]);
+export const Command = z.enum(["submit", "return_to_draft", "approve", "reject", "build", "activate", "rollback", "retire"]);
+export type Command = z.infer<typeof Command>;
+
+export const PolicyNodeType = z.enum(["RULE", "CLAUSE", "DISCLOSURE", "EXCEPTION", "INTERPRETATION", "EXAMPLE"]);
+export type PolicyNodeType = z.infer<typeof PolicyNodeType>;
+
+export const ContextMatchRead = z.object({
+  statement_index: z.number().int(),
+  found_by: z.array(z.enum(["lexical", "semantic"])),
+  rank: z.number().int(),
+});
+export type ContextMatchRead = z.infer<typeof ContextMatchRead>;
+
+export const ContextEvidenceRead = z.object({
+  node_key: z.string(),
+  node_type: PolicyNodeType,
+  language: PolicyLanguage,
+  excerpt: z.string(),
+  clause_ref: z.string().nullable(),
+  paths: z.array(z.array(z.string())),
+  matches: z.array(ContextMatchRead),
+});
+export type ContextEvidenceRead = z.infer<typeof ContextEvidenceRead>;
+
+export const ContextExceptionRead = z.object({
+  node_key: z.string(),
+  for_rule_id: z.string(),
+  applicable: Applicability,
+  reasons: z.array(z.string()),
+  excerpt: z.string(),
+  path: z.array(z.string()),
+});
+export type ContextExceptionRead = z.infer<typeof ContextExceptionRead>;
+
+export const Role = z.enum(["creator", "reviewer", "policy_admin", "policy_approver", "publisher", "admin"]);
 export type Role = z.infer<typeof Role>;
 
 export const RecruitmentStatus = z.enum(["recruiting", "closed"]);
@@ -100,6 +245,30 @@ export const ContextRead = z.object({
   active_policy: PolicySummary.nullable(),
 });
 export type ContextRead = z.infer<typeof ContextRead>;
+
+export const ContextRuleRead = z.object({
+  rule_id: z.string(),
+  rule_version: z.number().int(),
+  node_key: z.string(),
+  mandatory: z.boolean(),
+  check_type: CheckType,
+  gate: Gate,
+  severity: Severity,
+  unresolved: z.array(z.string()),
+});
+export type ContextRuleRead = z.infer<typeof ContextRuleRead>;
+
+/** Zero-based Unicode code-point offsets into the validated text; end is exclusive. */
+export const TextSpan = z.object({
+  start: z.number().int().min(0),
+  end: z.number().int().min(0),
+});
+export type TextSpan = z.infer<typeof TextSpan>;
+
+export const ContextStatementRead = z.object({
+  span: TextSpan.nullable(),
+});
+export type ContextStatementRead = z.infer<typeof ContextStatementRead>;
 
 export const CoverageGap = z.object({
   rule_id: z.string().nullable().optional(),
@@ -196,6 +365,18 @@ export const CreativeVersionPage = z.object({
 });
 export type CreativeVersionPage = z.infer<typeof CreativeVersionPage>;
 
+export const PolicyEdgeType = z.enum(["supported_by", "requires_disclosure", "except_when", "supersedes", "applies_to"]);
+export type PolicyEdgeType = z.infer<typeof PolicyEdgeType>;
+
+export const EdgeCreate = z.object({
+  edge_type: PolicyEdgeType,
+  from_node_id: z.string(),
+  to_node_id: z.string(),
+  provenance_clause_id: z.string().nullable().optional(),
+  provenance_note: z.string().min(1).max(1000).nullable().optional(),
+});
+export type EdgeCreate = z.infer<typeof EdgeCreate>;
+
 /** Why generation is or is not allowed for one creative version. */
 export const EligibilityReason = z.enum(["ELIGIBLE", "STALE_VERSION", "STUDY_CLOSED", "NO_ACTIVE_POLICY", "NOT_VALIDATED", "VALIDATION_FAILED", "NEEDS_REVIEW"]);
 export type EligibilityReason = z.infer<typeof EligibilityReason>;
@@ -224,8 +405,8 @@ export const ExportManifest = z.object({
 });
 export type ExportManifest = z.infer<typeof ExportManifest>;
 
-export const Severity = z.enum(["critical", "major", "minor"]);
-export type Severity = z.infer<typeof Severity>;
+export const ExtractionCode = z.enum(["SOURCE_UNREADABLE", "SOURCE_EMPTY", "SOURCE_TOO_MANY_PAGES", "SOURCE_TOO_MANY_CLAUSES", "SOURCE_STORAGE_UNAVAILABLE", "SOURCE_EXTRACTION_TIMEOUT", "SOURCE_EXTRACTION_FAILED"]);
+export type ExtractionCode = z.infer<typeof ExtractionCode>;
 
 export const SourceReference = z.object({
   source_id: z.string(),
@@ -233,13 +414,6 @@ export const SourceReference = z.object({
   excerpt: z.string().nullable().optional(),
 });
 export type SourceReference = z.infer<typeof SourceReference>;
-
-/** Zero-based Unicode code-point offsets into the validated text; end is exclusive. */
-export const TextSpan = z.object({
-  start: z.number().int().min(0),
-  end: z.number().int().min(0),
-});
-export type TextSpan = z.infer<typeof TextSpan>;
 
 /** Fractions (0..1) of the stored image's original width and height, top-left origin. */
 export const ImageRegion = z.object({
@@ -263,9 +437,6 @@ export const Finding = z.object({
   needs_human_decision: z.boolean(),
 });
 export type Finding = z.infer<typeof Finding>;
-
-export const Gate = z.enum(["completeness", "study_facts", "policy", "media"]);
-export type Gate = z.infer<typeof Gate>;
 
 export const GateResult = z.object({
   gate: Gate,
@@ -291,13 +462,17 @@ export const JobAccepted = z.object({
 });
 export type JobAccepted = z.infer<typeof JobAccepted>;
 
+/** Where a job is inside its execution state. Shown in the UI, so values are part of the API. */
+export const JobStage = z.enum(["submitting", "retry_wait", "reconcile", "waiting_provider", "output_ready", "fetching_output", "stored"]);
+export type JobStage = z.infer<typeof JobStage>;
+
 export const JobRead = z.object({
   job_id: z.string(),
   kind: JobKind,
   creative_id: z.string(),
   creative_version: z.number().int(),
   state: ExecutionState,
-  stage: z.string().nullable(),
+  stage: JobStage.nullable(),
   provider_request_id: z.string().nullable(),
   failure_code: z.string().nullable(),
   failure_message: z.string().nullable(),
@@ -323,12 +498,23 @@ export const MeRead = z.object({
 });
 export type MeRead = z.infer<typeof MeRead>;
 
-/** A finished generated image the caller can see. Uploads are not supported yet. */
+export const MediaAuthorizationInput = z.object({
+  identifiable_person: IdentifiablePerson,
+  usage_authorization_ref: z.string().min(1).max(200).nullable().optional(),
+  permitted_channels: z.array(Channel).optional(),
+  expires_at: z.iso.datetime({ offset: true }).nullable().optional(),
+});
+export type MediaAuthorizationInput = z.infer<typeof MediaAuthorizationInput>;
+
+/** A finished generated image, or an upload that passed inspection, the caller can see. */
 export const MediaItem = z.object({
   asset_id: z.string(),
-  creative_id: z.string(),
-  creative_version: z.number().int(),
+  creative_id: z.string().nullable(),
+  creative_version: z.number().int().nullable(),
   origin: AssetOrigin,
+  study_id: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
+  authorization: MediaAuthorization.nullable().optional(),
   mime_type: z.string(),
   width_px: z.number().int(),
   height_px: z.number().int(),
@@ -346,6 +532,115 @@ export const MediaPage = z.object({
   next_cursor: z.iso.datetime({ offset: true }).nullable(),
 });
 export type MediaPage = z.infer<typeof MediaPage>;
+
+/** Why a manifest is incomplete. A caller must never treat any of these as a PASS. */
+export const MissingContextCode = z.enum(["APPLICABILITY_UNRESOLVED", "TRAVERSAL_TRUNCATED", "CONFLICT", "SOURCE_MISSING", "SEMANTIC_SEARCH_SKIPPED", "STATEMENTS_TRUNCATED"]);
+export type MissingContextCode = z.infer<typeof MissingContextCode>;
+
+export const MissingContextRead = z.object({
+  code: MissingContextCode,
+  rule_id: z.string().nullable(),
+  detail: z.string().nullable(),
+});
+export type MissingContextRead = z.infer<typeof MissingContextRead>;
+
+export const NodeCreate = z.object({
+  input_kinds: z.array(ValidationInputKind).optional(),
+  channels: z.array(Channel).optional(),
+  post_formats: z.array(PostFormat).optional(),
+  languages: z.array(PolicyLanguage).optional(),
+  audiences: z.array(z.string().min(1).max(64)).optional(),
+  jurisdictions: z.array(z.string().min(1).max(64)).optional(),
+  study_ids: z.array(z.string()).optional(),
+  effective_from: z.iso.datetime({ offset: true }).nullable().optional(),
+  effective_to: z.iso.datetime({ offset: true }).nullable().optional(),
+  required_study_fact: z.string().min(1).max(64).nullable().optional(),
+  node_key: z.string().min(1).max(80),
+  node_type: z.enum(["CLAUSE", "DISCLOSURE", "EXCEPTION", "INTERPRETATION", "EXAMPLE"]),
+  text: z.string().min(1).max(20000),
+  language: PolicyLanguage.optional(),
+  source_clause_id: z.string().nullable().optional(),
+});
+export type NodeCreate = z.infer<typeof NodeCreate>;
+
+export const NodeUpdate = z.object({
+  text: z.string().min(1).max(20000).nullable().optional(),
+  source_clause_id: z.string().nullable().optional(),
+  input_kinds: z.array(ValidationInputKind).nullable().optional(),
+  channels: z.array(Channel).nullable().optional(),
+  post_formats: z.array(PostFormat).nullable().optional(),
+  languages: z.array(PolicyLanguage).nullable().optional(),
+  audiences: z.array(z.string().min(1).max(64)).nullable().optional(),
+  jurisdictions: z.array(z.string().min(1).max(64)).nullable().optional(),
+  study_ids: z.array(z.string()).nullable().optional(),
+  effective_from: z.iso.datetime({ offset: true }).nullable().optional(),
+  effective_to: z.iso.datetime({ offset: true }).nullable().optional(),
+  required_study_fact: z.string().min(1).max(64).nullable().optional(),
+});
+export type NodeUpdate = z.infer<typeof NodeUpdate>;
+
+export const PolicyAuditAction = z.enum(["CREATE", "EDIT", "SUBMIT", "REVIEW", "APPROVE", "REJECT", "RETURN_TO_DRAFT", "BUILD_STARTED", "BUILD_READY", "BUILD_FAILED", "ACTIVATE", "ROLLBACK", "RETIRE"]);
+export type PolicyAuditAction = z.infer<typeof PolicyAuditAction>;
+
+export const PolicyAuditRead = z.object({
+  id: z.string(),
+  action: PolicyAuditAction,
+  from_state: BundleLifecycleState.nullable(),
+  to_state: BundleLifecycleState.nullable(),
+  actor: z.string(),
+  reason: z.string().nullable(),
+  details: z.record(z.string(), z.unknown()),
+  request_id: z.string().nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+export type PolicyAuditRead = z.infer<typeof PolicyAuditRead>;
+
+export const PolicyAuditPage = z.object({
+  items: z.array(PolicyAuditRead),
+  next_cursor: z.iso.datetime({ offset: true }).nullable(),
+});
+export type PolicyAuditPage = z.infer<typeof PolicyAuditPage>;
+
+export const PolicyBuildFailure = z.enum(["POLICY_BUILD_ABANDONED", "NO_APPROVED_NODES", "INDEX_CONTENT_CHANGED", "POLICY_INDEX_REFUSED", "EMBEDDING_UNAVAILABLE", "EMBEDDING_FAILED"]);
+export type PolicyBuildFailure = z.infer<typeof PolicyBuildFailure>;
+
+export const PolicyIssueRead = z.object({
+  code: CheckCode,
+  subject: z.string(),
+  message: z.string(),
+});
+export type PolicyIssueRead = z.infer<typeof PolicyIssueRead>;
+
+export const PolicyBundleChecks = z.object({
+  issues: z.array(PolicyIssueRead),
+});
+export type PolicyBundleChecks = z.infer<typeof PolicyBundleChecks>;
+
+export const PolicyBundleDetail = z.object({
+  id: z.string(),
+  version: z.number().int(),
+  name: z.string(),
+  source_ref: z.string(),
+  is_synthetic: z.boolean(),
+  lifecycle_state: BundleLifecycleState,
+  revision: z.number().int(),
+  based_on_bundle_id: z.string().nullable(),
+  approved_by: z.string().nullable(),
+  approved_at: z.iso.datetime({ offset: true }).nullable(),
+  activated_by: z.string().nullable(),
+  activated_at: z.iso.datetime({ offset: true }).nullable(),
+  last_error_code: PolicyBuildFailure.nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+  rule_count: z.number().int(),
+});
+export type PolicyBundleDetail = z.infer<typeof PolicyBundleDetail>;
+
+export const PolicyBundlePage = z.object({
+  items: z.array(PolicyBundleDetail),
+  next_cursor: z.number().int().nullable(),
+});
+export type PolicyBundlePage = z.infer<typeof PolicyBundlePage>;
 
 /** One rule a creative is validated against. Findings cite rule_id and rule_version. */
 export const PolicyRule = z.object({
@@ -373,7 +668,263 @@ export const PolicyBundleRead = z.object({
 });
 export type PolicyBundleRead = z.infer<typeof PolicyBundleRead>;
 
-export const RuleResultValue = z.enum(["PASS", "FAIL", "NOT_APPLICABLE", "UNABLE_TO_ASSESS"]);
+export const PolicyBundleRulesRead = z.object({
+  policy_bundle_id: z.string(),
+  version: z.number().int(),
+  name: z.string(),
+  lifecycle_state: BundleLifecycleState,
+  is_synthetic: z.boolean(),
+  rules: z.array(BundleRuleRead),
+});
+export type PolicyBundleRulesRead = z.infer<typeof PolicyBundleRulesRead>;
+
+export const PolicyClauseRead = z.object({
+  id: z.string(),
+  clause_ref: z.string(),
+  section: z.string().nullable(),
+  page: z.number().int().nullable(),
+  text: z.string(),
+  checksum_sha256: z.string(),
+  language: PolicyLanguage,
+});
+export type PolicyClauseRead = z.infer<typeof PolicyClauseRead>;
+
+export const PolicyClauseList = z.object({
+  items: z.array(PolicyClauseRead),
+});
+export type PolicyClauseList = z.infer<typeof PolicyClauseList>;
+
+/** Review decision on one node, edge or wording. APPROVED rows are the ones retrieval reads. */
+export const ReviewState = z.enum(["PROPOSED", "APPROVED", "REJECTED"]);
+export type ReviewState = z.infer<typeof ReviewState>;
+
+/** Who produced a graph row. LLM_SIMULATED is a labelled stand-in, never a real model. */
+export const ProposalOrigin = z.enum(["HUMAN", "IMPORT", "LLM_SIMULATED", "LLM"]);
+export type ProposalOrigin = z.infer<typeof ProposalOrigin>;
+
+export const PolicyEdgeRead = z.object({
+  review_state: ReviewState,
+  origin: ProposalOrigin,
+  reviewed_by: z.string().nullable(),
+  reviewed_at: z.iso.datetime({ offset: true }).nullable(),
+  review_note: z.string().nullable(),
+  id: z.string(),
+  edge_type: PolicyEdgeType,
+  from_node_id: z.string(),
+  to_node_id: z.string(),
+  provenance_clause_id: z.string().nullable(),
+  provenance_note: z.string().nullable(),
+});
+export type PolicyEdgeRead = z.infer<typeof PolicyEdgeRead>;
+
+export const PolicyEdgeList = z.object({
+  items: z.array(PolicyEdgeRead),
+});
+export type PolicyEdgeList = z.infer<typeof PolicyEdgeList>;
+
+export const PolicyNodeRead = z.object({
+  review_state: ReviewState,
+  origin: ProposalOrigin,
+  reviewed_by: z.string().nullable(),
+  reviewed_at: z.iso.datetime({ offset: true }).nullable(),
+  review_note: z.string().nullable(),
+  id: z.string(),
+  node_key: z.string(),
+  node_type: PolicyNodeType,
+  text: z.string(),
+  language: PolicyLanguage,
+  source_clause_id: z.string().nullable(),
+  input_kinds: z.array(z.string()),
+  channels: z.array(z.string()),
+  post_formats: z.array(z.string()),
+  languages: z.array(z.string()),
+  audiences: z.array(z.string()),
+  jurisdictions: z.array(z.string()),
+  study_ids: z.array(z.string()),
+  effective_from: z.iso.datetime({ offset: true }).nullable(),
+  effective_to: z.iso.datetime({ offset: true }).nullable(),
+  required_study_fact: z.string().nullable(),
+});
+export type PolicyNodeRead = z.infer<typeof PolicyNodeRead>;
+
+export const PolicyNodeList = z.object({
+  items: z.array(PolicyNodeRead),
+});
+export type PolicyNodeList = z.infer<typeof PolicyNodeList>;
+
+export const WordingKind = z.enum(["EXACT_WORDING", "PROHIBITED_PHRASE", "STUDY_APPROVED_WORDING"]);
+export type WordingKind = z.infer<typeof WordingKind>;
+
+export const PolicyWordingRead = z.object({
+  review_state: ReviewState,
+  origin: ProposalOrigin,
+  reviewed_by: z.string().nullable(),
+  reviewed_at: z.iso.datetime({ offset: true }).nullable(),
+  review_note: z.string().nullable(),
+  id: z.string(),
+  policy_rule_id: z.string(),
+  language: PolicyLanguage,
+  kind: WordingKind,
+  text: z.string(),
+  source_clause_id: z.string().nullable(),
+  translation_of_id: z.string().nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+export type PolicyWordingRead = z.infer<typeof PolicyWordingRead>;
+
+export const PolicyRuleRead = z.object({
+  id: z.string(),
+  rule_id: z.string(),
+  rule_version: z.number().int(),
+  title: z.string(),
+  requirement: z.string(),
+  gate: Gate,
+  severity: Severity,
+  mandatory: z.boolean(),
+  check_type: CheckType,
+  node: PolicyNodeRead,
+  wordings: z.array(PolicyWordingRead),
+});
+export type PolicyRuleRead = z.infer<typeof PolicyRuleRead>;
+
+export const PolicyRuleList = z.object({
+  items: z.array(PolicyRuleRead),
+});
+export type PolicyRuleList = z.infer<typeof PolicyRuleList>;
+
+export const PolicySourceCreate = z.object({
+  upload_id: z.string(),
+  title: z.string().min(1).max(300),
+  source_ref: z.string().min(1).max(300),
+  language: PolicyLanguage.optional(),
+  is_synthetic: z.boolean(),
+});
+export type PolicySourceCreate = z.infer<typeof PolicySourceCreate>;
+
+/** Where a policy source is in text extraction; one that arrives with clauses is EXTRACTED. */
+export const SourceExtractionState = z.enum(["PENDING", "EXTRACTING", "EXTRACTED", "FAILED"]);
+export type SourceExtractionState = z.infer<typeof SourceExtractionState>;
+
+export const PolicySourceRead = z.object({
+  id: z.string(),
+  title: z.string(),
+  source_ref: z.string(),
+  checksum_sha256: z.string(),
+  language: PolicyLanguage,
+  is_synthetic: z.boolean(),
+  upload_id: z.string().nullable(),
+  extraction_state: SourceExtractionState,
+  extraction_error_code: ExtractionCode.nullable(),
+  page_count: z.number().int().nullable(),
+  extracted_at: z.iso.datetime({ offset: true }).nullable(),
+  created_by: z.string(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+export type PolicySourceRead = z.infer<typeof PolicySourceRead>;
+
+export const PolicySourcePage = z.object({
+  items: z.array(PolicySourceRead),
+  next_cursor: z.iso.datetime({ offset: true }).nullable(),
+});
+export type PolicySourcePage = z.infer<typeof PolicySourcePage>;
+
+/** A policy source file (PDF, plain text or Markdown) for the tenant's policy library. */
+export const PolicyUploadCreate = z.object({
+  name: z.string().min(1).max(255),
+  mime_type: z.string().max(64),
+  size_bytes: z.number().int().min(1),
+  checksum_sha256: z.string(),
+});
+export type PolicyUploadCreate = z.infer<typeof PolicyUploadCreate>;
+
+export const UploadPurpose = z.enum(["creative_media", "policy_source"]);
+export type UploadPurpose = z.infer<typeof UploadPurpose>;
+
+/** Where a client upload is. Only READY uploads become assets that later steps may use. */
+export const UploadState = z.enum(["PENDING_UPLOAD", "QUARANTINED", "SCANNING", "READY", "REJECTED", "EXPIRED"]);
+export type UploadState = z.infer<typeof UploadState>;
+
+/** Why an upload was rejected, or the last temporary problem while it waits. */
+export const UploadReason = z.object({
+  code: z.string(),
+  message: z.string(),
+  retryable: z.boolean(),
+});
+export type UploadReason = z.infer<typeof UploadReason>;
+
+export const UploadScan = z.object({
+  engine: z.string(),
+  simulated: z.boolean(),
+  scanned_at: z.iso.datetime({ offset: true }),
+});
+export type UploadScan = z.infer<typeof UploadScan>;
+
+/** Where and how to send the file: one PUT of the exact bytes declared, with these headers. */
+export const UploadTarget = z.object({
+  url: z.string(),
+  method: z.literal("PUT"),
+  headers: z.record(z.string(), z.string()),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+export type UploadTarget = z.infer<typeof UploadTarget>;
+
+/** A policy source upload. READY means it passed the checks; it is never an asset. */
+export const PolicyUploadRead = z.object({
+  upload_id: z.string(),
+  purpose: UploadPurpose,
+  status: UploadState,
+  reason: UploadReason.nullable(),
+  name: z.string(),
+  mime_type: z.string(),
+  size_bytes: z.number().int(),
+  checksum_sha256: z.string(),
+  scan: UploadScan.nullable(),
+  created_by: z.string(),
+  created_at: z.iso.datetime({ offset: true }),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  upload: UploadTarget.nullable().optional(),
+});
+export type PolicyUploadRead = z.infer<typeof PolicyUploadRead>;
+
+export const RetrievalMode = z.enum(["graph_only", "lexical_only", "full"]);
+export type RetrievalMode = z.infer<typeof RetrievalMode>;
+
+export const ReviewItemKind = z.enum(["node", "edge", "wording"]);
+export type ReviewItemKind = z.infer<typeof ReviewItemKind>;
+
+export const ReviewDecisionRequest = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  note: z.string().min(1).max(1000).nullable().optional(),
+  item_kind: ReviewItemKind,
+  item_id: z.string(),
+});
+export type ReviewDecisionRequest = z.infer<typeof ReviewDecisionRequest>;
+
+export const RuleCreate = z.object({
+  input_kinds: z.array(ValidationInputKind).optional(),
+  channels: z.array(Channel).optional(),
+  post_formats: z.array(PostFormat).optional(),
+  languages: z.array(PolicyLanguage).optional(),
+  audiences: z.array(z.string().min(1).max(64)).optional(),
+  jurisdictions: z.array(z.string().min(1).max(64)).optional(),
+  study_ids: z.array(z.string()).optional(),
+  effective_from: z.iso.datetime({ offset: true }).nullable().optional(),
+  effective_to: z.iso.datetime({ offset: true }).nullable().optional(),
+  required_study_fact: z.string().min(1).max(64).nullable().optional(),
+  rule_id: z.string(),
+  rule_version: z.number().int().min(1).optional(),
+  title: z.string().min(1).max(200),
+  requirement: z.string().min(1).max(1000),
+  gate: Gate,
+  severity: Severity,
+  mandatory: z.boolean(),
+  check_type: CheckType,
+  text: z.string().min(1).max(20000),
+  language: PolicyLanguage.optional(),
+});
+export type RuleCreate = z.infer<typeof RuleCreate>;
+
+export const RuleResultValue = z.enum(["PASS", "FAIL", "NOT_APPLICABLE", "UNABLE_TO_ASSESS", "NEEDS_REVIEW"]);
 export type RuleResultValue = z.infer<typeof RuleResultValue>;
 
 export const RuleResult = z.object({
@@ -385,12 +936,110 @@ export const RuleResult = z.object({
 });
 export type RuleResult = z.infer<typeof RuleResult>;
 
+export const RuleUpdate = z.object({
+  title: z.string().min(1).max(200).nullable().optional(),
+  requirement: z.string().min(1).max(1000).nullable().optional(),
+  gate: Gate.nullable().optional(),
+  severity: Severity.nullable().optional(),
+  mandatory: z.boolean().nullable().optional(),
+  check_type: CheckType.nullable().optional(),
+});
+export type RuleUpdate = z.infer<typeof RuleUpdate>;
+
+export const SupersededRuleRead = z.object({
+  rule_id: z.string(),
+  superseded_by: z.string(),
+});
+export type SupersededRuleRead = z.infer<typeof SupersededRuleRead>;
+
+export const TransitionCommandRequest = z.object({
+  reason: z.string().min(1).max(1000).nullable().optional(),
+  command: Command,
+});
+export type TransitionCommandRequest = z.infer<typeof TransitionCommandRequest>;
+
+export const UploadCreate = z.object({
+  study_id: z.string(),
+  creative_id: z.string().nullable().optional(),
+  name: z.string().min(1).max(255),
+  mime_type: z.string().max(64),
+  size_bytes: z.number().int().min(1),
+  checksum_sha256: z.string(),
+  authorization: MediaAuthorizationInput,
+});
+export type UploadCreate = z.infer<typeof UploadCreate>;
+
+/** What POST /assets/uploads accepts. Configured per environment; read it, don't hard-code. */
+export const UploadLimits = z.object({
+  image_types: z.array(z.string()),
+  image_max_bytes: z.number().int(),
+  upload_url_ttl_seconds: z.number().int(),
+});
+export type UploadLimits = z.infer<typeof UploadLimits>;
+
+/** A client upload. Once READY, asset_id also works with GET /assets/{asset_id}. */
+export const UploadRead = z.object({
+  asset_id: z.string(),
+  study_id: z.string(),
+  creative_id: z.string().nullable(),
+  purpose: UploadPurpose,
+  status: UploadState,
+  reason: UploadReason.nullable(),
+  name: z.string(),
+  mime_type: z.string(),
+  size_bytes: z.number().int(),
+  checksum_sha256: z.string(),
+  width_px: z.number().int().nullable(),
+  height_px: z.number().int().nullable(),
+  scan: UploadScan.nullable(),
+  authorization: MediaAuthorization,
+  created_by: z.string(),
+  created_at: z.iso.datetime({ offset: true }),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  upload: UploadTarget.nullable().optional(),
+});
+export type UploadRead = z.infer<typeof UploadRead>;
+
+export const UploadPage = z.object({
+  items: z.array(UploadRead),
+  next_cursor: z.iso.datetime({ offset: true }).nullable(),
+});
+export type UploadPage = z.infer<typeof UploadPage>;
+
 export const ValidationAccepted = z.object({
   job_id: z.string(),
   validation_run_id: z.string(),
   state: ExecutionState,
 });
 export type ValidationAccepted = z.infer<typeof ValidationAccepted>;
+
+/** The policy context stored for one validation run: which rules it had to use and why. Evidence only for now: the run's outcome comes from the rule checks until NRC-7's judge uses this context. A code in missing_context means the context is incomplete, never a pass. */
+export const ValidationContextRead = z.object({
+  validation_run_id: z.string(),
+  manifest_sha256: z.string().nullable(),
+  policy_bundle_id: z.string(),
+  policy_bundle_version: z.number().int(),
+  is_synthetic: z.boolean(),
+  study_snapshot_id: z.string(),
+  study_snapshot_version: z.number().int(),
+  input_kind: ValidationInputKind,
+  channel: Channel,
+  post_format: PostFormat.nullable(),
+  language: PolicyLanguage,
+  audience: z.string().nullable(),
+  jurisdiction: z.string().nullable(),
+  evaluated_at: z.iso.datetime({ offset: true }),
+  retrieval_mode: RetrievalMode,
+  embedding_model_id: z.string().nullable(),
+  statements: z.array(ContextStatementRead),
+  required_rules: z.array(ContextRuleRead),
+  optional_rules: z.array(ContextRuleRead),
+  evidence: z.array(ContextEvidenceRead),
+  exceptions: z.array(ContextExceptionRead),
+  superseded: z.array(SupersededRuleRead),
+  missing_context: z.array(MissingContextRead),
+});
+export type ValidationContextRead = z.infer<typeof ValidationContextRead>;
 
 export const ValidationCreate = z.object({
   creative_id: z.string(),
@@ -420,12 +1069,42 @@ export const ValidationRunRead = z.object({
 });
 export type ValidationRunRead = z.infer<typeof ValidationRunRead>;
 
+export const WordingCreate = z.object({
+  language: PolicyLanguage.optional(),
+  kind: WordingKind,
+  text: z.string().min(1).max(20000),
+  source_clause_id: z.string().nullable().optional(),
+  translation_of_id: z.string().nullable().optional(),
+});
+export type WordingCreate = z.infer<typeof WordingCreate>;
+
 /** Every schema type by name, as `components["schemas"]` was in the OpenAPI types. */
 export interface Schemas {
+  Applicability: Applicability;
   AssetOrigin: AssetOrigin;
-  AssetRead: AssetRead;
-  Capability: Capability;
+  IdentifiablePerson: IdentifiablePerson;
   Channel: Channel;
+  AuthorizationStatus: AuthorizationStatus;
+  MediaAuthorization: MediaAuthorization;
+  AssetRead: AssetRead;
+  BundleCreate: BundleCreate;
+  BundleLifecycleState: BundleLifecycleState;
+  Gate: Gate;
+  Severity: Severity;
+  CheckType: CheckType;
+  RuleApplicabilityRead: RuleApplicabilityRead;
+  PolicyLanguage: PolicyLanguage;
+  RuleSourceRead: RuleSourceRead;
+  RuleTextRead: RuleTextRead;
+  RuleExceptionRead: RuleExceptionRead;
+  BundleRuleRead: BundleRuleRead;
+  Capability: Capability;
+  CheckCode: CheckCode;
+  Command: Command;
+  PolicyNodeType: PolicyNodeType;
+  ContextMatchRead: ContextMatchRead;
+  ContextEvidenceRead: ContextEvidenceRead;
+  ContextExceptionRead: ContextExceptionRead;
   Role: Role;
   RecruitmentStatus: RecruitmentStatus;
   Language: Language;
@@ -435,6 +1114,9 @@ export interface Schemas {
   PostFormatOption: PostFormatOption;
   PolicySummary: PolicySummary;
   ContextRead: ContextRead;
+  ContextRuleRead: ContextRuleRead;
+  TextSpan: TextSpan;
+  ContextStatementRead: ContextStatementRead;
   CoverageGap: CoverageGap;
   CreativeCreate: CreativeCreate;
   JobKind: JobKind;
@@ -447,28 +1129,79 @@ export interface Schemas {
   CreativeUpdate: CreativeUpdate;
   CreativeVersionRead: CreativeVersionRead;
   CreativeVersionPage: CreativeVersionPage;
+  PolicyEdgeType: PolicyEdgeType;
+  EdgeCreate: EdgeCreate;
   EligibilityReason: EligibilityReason;
   ErrorBody: ErrorBody;
   ExportManifest: ExportManifest;
-  Severity: Severity;
+  ExtractionCode: ExtractionCode;
   SourceReference: SourceReference;
-  TextSpan: TextSpan;
   ImageRegion: ImageRegion;
   Finding: Finding;
-  Gate: Gate;
   GateResult: GateResult;
   GenerationEligibility: GenerationEligibility;
   JobAccepted: JobAccepted;
+  JobStage: JobStage;
   JobRead: JobRead;
   TenantMembershipRead: TenantMembershipRead;
   MeRead: MeRead;
+  MediaAuthorizationInput: MediaAuthorizationInput;
   MediaItem: MediaItem;
   MediaPage: MediaPage;
+  MissingContextCode: MissingContextCode;
+  MissingContextRead: MissingContextRead;
+  NodeCreate: NodeCreate;
+  NodeUpdate: NodeUpdate;
+  PolicyAuditAction: PolicyAuditAction;
+  PolicyAuditRead: PolicyAuditRead;
+  PolicyAuditPage: PolicyAuditPage;
+  PolicyBuildFailure: PolicyBuildFailure;
+  PolicyIssueRead: PolicyIssueRead;
+  PolicyBundleChecks: PolicyBundleChecks;
+  PolicyBundleDetail: PolicyBundleDetail;
+  PolicyBundlePage: PolicyBundlePage;
   PolicyRule: PolicyRule;
   PolicyBundleRead: PolicyBundleRead;
+  PolicyBundleRulesRead: PolicyBundleRulesRead;
+  PolicyClauseRead: PolicyClauseRead;
+  PolicyClauseList: PolicyClauseList;
+  ReviewState: ReviewState;
+  ProposalOrigin: ProposalOrigin;
+  PolicyEdgeRead: PolicyEdgeRead;
+  PolicyEdgeList: PolicyEdgeList;
+  PolicyNodeRead: PolicyNodeRead;
+  PolicyNodeList: PolicyNodeList;
+  WordingKind: WordingKind;
+  PolicyWordingRead: PolicyWordingRead;
+  PolicyRuleRead: PolicyRuleRead;
+  PolicyRuleList: PolicyRuleList;
+  PolicySourceCreate: PolicySourceCreate;
+  SourceExtractionState: SourceExtractionState;
+  PolicySourceRead: PolicySourceRead;
+  PolicySourcePage: PolicySourcePage;
+  PolicyUploadCreate: PolicyUploadCreate;
+  UploadPurpose: UploadPurpose;
+  UploadState: UploadState;
+  UploadReason: UploadReason;
+  UploadScan: UploadScan;
+  UploadTarget: UploadTarget;
+  PolicyUploadRead: PolicyUploadRead;
+  RetrievalMode: RetrievalMode;
+  ReviewItemKind: ReviewItemKind;
+  ReviewDecisionRequest: ReviewDecisionRequest;
+  RuleCreate: RuleCreate;
   RuleResultValue: RuleResultValue;
   RuleResult: RuleResult;
+  RuleUpdate: RuleUpdate;
+  SupersededRuleRead: SupersededRuleRead;
+  TransitionCommandRequest: TransitionCommandRequest;
+  UploadCreate: UploadCreate;
+  UploadLimits: UploadLimits;
+  UploadRead: UploadRead;
+  UploadPage: UploadPage;
   ValidationAccepted: ValidationAccepted;
+  ValidationContextRead: ValidationContextRead;
   ValidationCreate: ValidationCreate;
   ValidationRunRead: ValidationRunRead;
+  WordingCreate: WordingCreate;
 }

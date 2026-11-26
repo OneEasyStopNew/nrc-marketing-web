@@ -1,4 +1,4 @@
-import type { MockCreative, MockJob, MockValidationRun, MockWorkspace } from './types';
+import type { MockAiFix, MockClientCheck, MockClientMedia, MockClientPost, MockCreative, MockJob, MockValidationRun, MockWorkspace } from './types';
 
 /**
  * In-memory state of the pretend authorization server and API, shared by the
@@ -14,7 +14,7 @@ const WORKSPACE_KEY = 'nrc.sim.workspace';
 const JOBS_KEY = 'nrc.sim.jobs';
 
 export const mockServer = {
-  /** Issued access token → dummy user id. */
+  /** Issued access token â†’ dummy user id. */
   tokens: new Map<string, string>(),
   /** False after "End session": the next refresh is refused. */
   refreshAllowed: true,
@@ -24,7 +24,7 @@ export const mockServer = {
   nextValidationFailure: null as null | 'timeout' | 'extraction',
   /** Set by the simulation tools: how the next image requests are answered, one entry per request. */
   nextImageLinks: [] as ('expired' | 'unavailable' | 'other-organisation')[],
-  /** Create requests already handled: `${tenant}:${Idempotency-Key}` → payload and the draft it made. */
+  /** Create requests already handled: `${tenant}:${Idempotency-Key}` â†’ payload and the draft it made. */
   idempotency: new Map<string, { payload: string; id: string }>(),
 
   issueToken(userId: string): string {
@@ -83,7 +83,38 @@ export const mockServer = {
     if (!jobs) return;
     try { sessionStorage.setItem(JOBS_KEY, JSON.stringify([...jobs.values()])); } catch { /* storage blocked */ }
   },
+
+  /** Client posts, their uploaded files and their checks (NRC-41), kept across reloads. */
+  client(): ClientStore {
+    if (!client) {
+      let stored: SavedClientStore | null = null;
+      // Written only by saveClient() in this tab (simulation, development only).
+      try { stored = JSON.parse(sessionStorage.getItem(CLIENT_KEY) ?? 'null') as SavedClientStore | null; } catch { /* start empty */ }
+      client = {
+        posts: new Map((stored?.posts ?? []).map((p) => [p.id, p])),
+        media: new Map((stored?.media ?? []).map((m) => [m.asset_id, m])),
+        checks: new Map((stored?.checks ?? []).map((c) => [c.final.check_id, c])),
+        fixes: new Map((stored?.fixes ?? []).map((x) => [x.fix_id, x])),
+      };
+    }
+    return client;
+  },
+  saveClient(): void {
+    if (!client) return;
+    const saved: SavedClientStore = { posts: [...client.posts.values()], media: [...client.media.values()], checks: [...client.checks.values()], fixes: [...client.fixes.values()] };
+    try { sessionStorage.setItem(CLIENT_KEY, JSON.stringify(saved)); } catch { /* storage blocked */ }
+  },
 };
+
+const CLIENT_KEY = 'nrc.sim.client-posts';
+interface ClientStore {
+  posts: Map<string, MockClientPost>;
+  media: Map<string, MockClientMedia>;
+  checks: Map<string, MockClientCheck>;
+  fixes: Map<string, MockAiFix>;
+}
+interface SavedClientStore { posts: MockClientPost[]; media: MockClientMedia[]; checks: MockClientCheck[]; fixes?: MockAiFix[] }
+let client: ClientStore | null = null;
 
 /** Media, rules, approvals, accounts, publications and team per tenant, seeded from data.ts. */
 export function workspaceFor(tenantId: string, seed: Record<string, MockWorkspace>): MockWorkspace {

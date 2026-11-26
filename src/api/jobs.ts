@@ -11,14 +11,15 @@ import * as S from './schemas.gen';
  * or approval of the image it produced.
  */
 
-export type Job = S.JobRead;
+/** JobRead as this app reads it (see JobReadChecked below): `stage` stays open text. */
+export type Job = z.infer<typeof JobReadChecked>;
 export type JobAccepted = S.JobAccepted;
 export type JobState = Job['state'];
 
 /**
  * Where a job is inside its state, in pipeline order. Mirrors the backend's
- * JobStage (app/models/enums.py); the contract types `stage` as a plain
- * string, so an unknown stage must never break the page.
+ * JobStage (app/models/enums.py). The contract lists them, but a stage this
+ * build does not know must never break the page, so `stage` is read as text.
  */
 export const JOB_STAGES = [
   'submitting',
@@ -69,23 +70,36 @@ export const isUuid = (s: string): boolean => UUID.test(s);
 
 // Checks the generated schemas can't express: the contract's `format: uuid` is
 // not in schemas.gen.ts, and a state this build doesn't know must read as
-// UNKNOWN ("being confirmed") instead of failing the whole answer.
+// UNKNOWN ("being confirmed") instead of failing the whole answer. A stage this
+// build doesn't know is kept as sent: jobProgress() falls back to the state's step.
 const JobId = z.string().refine(isUuid, { message: 'Expected a UUID' });
 const State = S.ExecutionState.catch('UNKNOWN');
-const JobReadChecked = S.JobRead.extend({ job_id: JobId, state: State });
+const JobReadChecked = S.JobRead.extend({ job_id: JobId, state: State, stage: z.string().nullable() });
 const JobAcceptedChecked = S.JobAccepted.extend({ job_id: JobId, state: State });
+
+/** The model and, for a text-in-image model, the exact text (proposed; NRC-21). */
+export interface ImageChoice {
+  model?: string;
+  /** One line per line. Only for a text-in-image model; never an empty string. */
+  image_text?: string;
+}
 
 export const jobsApi = {
   /**
    * Only from an explicit "Generate image" action, for a version whose brief
    * passed. `signal` lets the page drop the answer once the user has left.
    */
-  startImage: async (creativeId: string, creativeVersion: number, idempotencyKey: string, signal?: AbortSignal): Promise<JobAccepted> =>
+  startImage: async (creativeId: string, creativeVersion: number, idempotencyKey: string, signal?: AbortSignal, choice?: ImageChoice): Promise<JobAccepted> =>
     (
       await requestWithMeta('POST', '/creative-jobs', JobAcceptedChecked, {
         idempotencyKey,
         signal: withTimeout(JOB_START_TIMEOUT_MS, signal),
-        body: { creative_id: creativeId, creative_version: creativeVersion, kind: 'image_generation' },
+        // `model` and `image_text` are left out entirely when not chosen: omitted means the default model and no text.
+        body: {
+          creative_id: creativeId, creative_version: creativeVersion, kind: 'image_generation',
+          ...(choice?.model ? { model: choice.model } : {}),
+          ...(choice?.image_text != null ? { image_text: choice.image_text } : {}),
+        },
       })
     ).data,
 

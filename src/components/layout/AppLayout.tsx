@@ -20,7 +20,8 @@ import { useToast } from '@/components/ui/Toast';
 import type { MarketingContext } from '@/api/session';
 
 export const ROLE_LABELS: Record<MarketingContext['roles'][number], string> = {
-  creator: 'Creator', reviewer: 'Reviewer', policy_admin: 'Policy administrator', publisher: 'Publisher', admin: 'Administrator',
+  creator: 'Creator', reviewer: 'Reviewer', policy_admin: 'Policy administrator', policy_approver: 'Policy approver',
+  publisher: 'Publisher', admin: 'Administrator',
 };
 
 /**

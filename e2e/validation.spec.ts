@@ -141,3 +141,34 @@ test('an unknown run id shows "not found", not another tenant\'s results', async
   await signInAt(page, '/marketing/validation/sim-cr-0001/sim-run-nope', 'creator');
   await expect(seen(page, 'Validation run not found')).toBeVisible();
 });
+
+// NRC-5 evidence: GET /validations/{id}/context on the results page.
+test('the results show the rules the run was checked against, with their source text', async ({ page }) => {
+  await signInAt(page, '/marketing/validation/sim-cr-0001/sim-run-0003', 'creator');
+  await expect(page.getByRole('heading', { name: 'Policy evidence' })).toBeVisible();
+  const rules = page.getByRole('list', { name: 'Rules this run was checked against' }).getByRole('listitem');
+  await expect(rules).toHaveCount(3);
+  // Required rules first, then the optional one.
+  await expect(rules.nth(0)).toContainText('SIM-COMPLETE-1 v1');
+  await expect(rules.nth(0)).toContainText('Required');
+  await expect(rules.nth(2)).toContainText('SIM-POLICY-4 v1');
+  await expect(rules.nth(2)).toContainText('Optional');
+  await expect(seen(page, 'Synthetic rules')).toBeVisible();
+  // The simulation searches by words only: said as a gap, never as a pass.
+  await expect(seen(page, 'The policy context is not complete')).toBeVisible();
+  await rules.nth(1).getByRole('button', { name: 'Source text (1)' }).click();
+  await expect(rules.nth(1).getByText(/^Clause Sim /)).toBeVisible();
+});
+
+test('a run that stored no policy context says so, without an error', async ({ page }) => {
+  await signInAt(page, SEEDED, 'creator');
+  await validateBrief(page, 'A calm clinic waiting room for a research study post.');
+  await page.getByRole('button', { name: 'Make the next validation time out' }).click();
+  await page.getByRole('link', { name: 'Revise the brief' }).click();
+  // A run that could not finish checked nothing, so it stored no context.
+  await validateBrief(page, 'A bright clinic waiting room for a research study post.');
+  await expect(seen(page, 'Validation could not finish')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Policy evidence' })).toBeVisible();
+  await expect(seen(page, 'No policy evidence was stored for this run.')).toBeVisible();
+  await expect(seen(page, 'The policy evidence could not be loaded')).toHaveCount(0);
+});

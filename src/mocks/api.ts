@@ -2,13 +2,15 @@ import { API_PREFIX } from '@/config/env';
 import { TENANT_HEADER } from '@/api/http';
 import type { Capability, ContextWire, MeWire } from '@/api/session';
 import { CAPTION_MAX, PROMPT_MAX, type Creative } from '@/api/creatives';
-import type { DummyUser, MockAsset, MockCreative, MockData, MockJob, MockValidationRun } from './types';
+import type { DummyUser, MockAiFix, MockAsset, MockClientCheck, MockClientMedia, MockClientPost, MockCreative, MockData, MockJob, MockValidationRun } from './types';
+import type { AiFix, ClientCheck } from '@/api/clientPosts';
+import { fromMicros, sumMoney, toMicros } from '@/api/usage';
 import type { Schemas } from '@/api/schemas.gen';
-import type { ValidationRun as ValidationRunRead } from '@/api/validations';
+import type { ValidationContext, ValidationRun as ValidationRunRead } from '@/api/validations';
 import { evaluate } from './validator';
 import { loadMockData, MOCK_DATA_PATH } from './load';
 import { mockServer, saveWorkspaces, workspaceFor } from './server';
-import type { MediaUpload, Member, PolicyRule, Publication, PublicationRequest, RuleDraft } from '@/api/workspace';
+import type { MediaUpload, Member, PolicyRule, Publication, PublicationRequest, RuleDraft, SocialChannel } from '@/api/workspace';
 
 /**
  * Fake Marketing API for simulation mode, following the backend's published
@@ -255,6 +257,46 @@ const ROUTES: Record<string, Handler> = {
     return json(200, readRun(run, c));
   },
 
+  /**
+   * NRC-5: the placeholder rules a finished brief or caption run was checked
+   * against, each with its placeholder source text. A run that did not finish,
+   * or an image run, stored none.
+   */
+  'GET /validations/:id/context': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const run = mockServer.runs(req.data.VALIDATION_RUNS).get(req.params.id);
+    const c = run?.tenant_id === req.tenantId ? store(req).get(run.creative_id) : undefined;
+    if (!run || !c) return problem(404, 'NOT_FOUND', 'This validation run does not exist or is not available to you.');
+    const read = readRun(run, c);
+    if (read.state !== 'SUCCEEDED' || read.input_kind === 'image') {
+      return problem(404, 'CONTEXT_NOT_AVAILABLE', 'No policy context was stored for this validation run.');
+    }
+    const rules = req.data.VALIDATION_RULES;
+    const selected = (mandatory: boolean): ValidationContext['required_rules'] => rules.filter((r) => r.mandatory === mandatory).map((r) => ({
+      rule_id: r.rule_id, rule_version: r.rule_version, node_key: r.rule_id, mandatory: r.mandatory,
+      // The fake validator only matches phrases and counts words: code, never a model.
+      check_type: 'deterministic', gate: r.gate, severity: r.severity, unresolved: [],
+    }));
+    const context: ValidationContext = {
+      validation_run_id: read.validation_run_id, manifest_sha256: null,
+      policy_bundle_id: SIM_POLICY_BUNDLE_ID, policy_bundle_version: req.data.POLICY_BUNDLE_VERSION, is_synthetic: true,
+      study_snapshot_id: c.study_snapshot_id, study_snapshot_version: read.study_snapshot_version,
+      input_kind: read.input_kind, channel: c.channel, post_format: c.post_format, language: c.language,
+      audience: null, jurisdiction: null, evaluated_at: read.evaluated_at ?? new Date(run.started_ms).toISOString(),
+      retrieval_mode: 'lexical_only', embedding_model_id: null, statements: [{ span: null }],
+      required_rules: selected(true), optional_rules: selected(false),
+      evidence: rules.map((r) => ({
+        node_key: `CL-${r.rule_id}`, node_type: 'CLAUSE', language: 'en', excerpt: r.source.excerpt ?? '[Placeholder clause text]',
+        clause_ref: r.source.clause, paths: [[r.rule_id, 'supported_by', `CL-${r.rule_id}`]], matches: [],
+      })),
+      exceptions: [], superseded: [],
+      // True of the simulation: it searches by words only.
+      missing_context: [{ code: 'SEMANTIC_SEARCH_SKIPPED', rule_id: null, detail: null }],
+    };
+    return json(200, context);
+  },
+
   'POST /__sim/fail-next-validation': (req) => {
     const mode = (req.body as { mode?: string } | undefined)?.mode;
     mockServer.nextValidationFailure = mode === 'extraction' ? 'extraction' : 'timeout';
@@ -288,6 +330,11 @@ const ROUTES: Record<string, Handler> = {
 
   /* ---------- Image generation (placeholder pictures only) ---------- */
 
+  'GET /generation-models': (req) => {
+    const denied = needCap(req, 'creative:read');
+    return denied ?? json(200, { items: req.data.GENERATION_MODELS ?? [] });
+  },
+
   'GET /creatives/:id/generation-eligibility': (req) => {
     const denied = needCap(req, 'creative:read');
     if (denied) return denied;
@@ -313,6 +360,19 @@ const ROUTES: Record<string, Handler> = {
     if (c?.tenant_id !== req.tenantId) return problem(404, 'NOT_FOUND', 'This draft does not exist or is not available to you.');
     const e = eligibilityOf(req, c, body.creative_version);
     if (!e.eligible) return problem(409, 'GENERATION_NOT_ELIGIBLE', e.message, false, { reason: e.reason });
+    // NRC-21 (proposed, Firoz): the model must be enabled; a text-in-image model needs the text;
+    // the brief (plus the image text, for that model) must fit the model's limit.
+    const choice = req.body as { model?: string; image_text?: string };
+    const models = req.data.GENERATION_MODELS ?? [];
+    if (models.length) {
+      const model = choice.model ? models.find((m) => m.model === choice.model) : models.find((m) => m.is_default);
+      const invalid = (reason: string, extra: Record<string, unknown> = {}) =>
+        problem(422, 'GENERATION_REQUEST_INVALID', 'The generation request is not valid for this model.', false, { reason, ...extra });
+      if (!model) return invalid('MODEL_NOT_ENABLED');
+      if (model.text_in_image && !choice.image_text?.trim()) return invalid('IMAGE_TEXT_REQUIRED');
+      const used = codePoints(c.current_prompt) + (model.text_in_image ? codePoints(choice.image_text ?? '') : 0);
+      if (used > model.max_brief_chars) return invalid('BRIEF_TOO_LONG', { max_brief_chars: model.max_brief_chars });
+    }
     const format = req.data.POST_FORMATS.find((f) => f.channel === c.channel && f.post_format === c.post_format);
     // A UUID like the API's: the web app refuses any other job id in a path (NRC-21).
     const id = crypto.randomUUID();
@@ -515,17 +575,37 @@ const ROUTES: Record<string, Handler> = {
     return denied ?? json(200, ws(req).accounts);
   },
 
+  'GET /social-sets': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    // The count is what the set holds now, so it moves when accounts are connected or removed.
+    return json(200, (ws(req).social_sets ?? []).map((s) => ({ ...s, account_count: ws(req).accounts.filter((a) => a.social_set_id === s.social_set_id).length })));
+  },
+
   'POST /accounts': (req) => {
     const denied = needCap(req, 'publication:manage');
     if (denied) return denied;
-    const b = req.body as { channel?: 'facebook' | 'instagram'; name?: string };
-    if (!b.name?.trim()) return fieldsProblem([{ loc: ['body', 'name'], msg: 'Name the page or profile.', type: 'missing' }]);
+    const b = req.body as { channel?: SocialChannel; name?: string; social_set_id?: string };
+    const errs: FieldError[] = [];
+    if (!b.name?.trim()) errs.push({ loc: ['body', 'name'], msg: 'Name the page or profile.', type: 'missing' });
+    const set = (ws(req).social_sets ?? []).find((s) => s.social_set_id === b.social_set_id);
+    if (!set) errs.push({ loc: ['body', 'social_set_id'], msg: 'Choose the social set this account belongs to.', type: 'missing' });
+    if (errs.length) return fieldsProblem(errs);
+    // At the limit nothing is removed and no upgrade is offered: the new account is refused.
+    const count = ws(req).accounts.filter((a) => a.social_set_id === set!.social_set_id).length;
+    if (count >= set!.account_limit) {
+      return problem(409, 'SOCIAL_SET_LIMIT', `${set!.name} already holds ${count} accounts, its limit is ${set!.account_limit}. Disconnect one, or ask an administrator to raise the limit.`);
+    }
+    const channel = b.channel ?? 'facebook';
+    const caps = req.data.CHANNEL_CAPABILITIES?.[channel] ?? { formats: ['Feed image'], caption_max: 2200, publish_mode: 'API' as const, required_fields: [], permissions: [] };
     const acc = {
-      account_id: `sim-acc-${crypto.randomUUID().slice(0, 6)}`, channel: b.channel ?? 'facebook', name: `${b.name.trim()} (simulation)`,
-      handle: b.name.trim().toLowerCase().replace(/\s+/g, '.'), state: 'TEST_ONLY' as const,
-      state_reason: 'Connected in simulation. Only test users would see posts.', permissions: ['pages_manage_posts'],
+      account_id: `sim-acc-${crypto.randomUUID().slice(0, 6)}`, social_set_id: set!.social_set_id, channel, name: `${b.name!.trim()} (simulation)`,
+      handle: b.name!.trim().toLowerCase().replace(/\s+/g, '.'), state: 'TEST_ONLY' as const,
+      state_reason: caps.publish_mode === 'MANUAL'
+        ? 'No publishing API for this account type: posts are handed off to post by hand.'
+        : 'Connected in simulation. Only test users would see posts.',
       connected_by: req.user.user_id, connected_at: new Date().toISOString(), expires_at: new Date(Date.now() + 90 * 864e5).toISOString(),
-      formats: b.channel === 'instagram' ? ['Feed image', 'Reel'] : ['Feed image', 'Feed video'],
+      ...structuredClone(caps),
     };
     ws(req).accounts.push(acc);
     logActivity(req, 'connected', acc.name, '/marketing/integrations');
@@ -537,7 +617,12 @@ const ROUTES: Record<string, Handler> = {
     if (denied) return denied;
     const acc = ws(req).accounts.find((a) => a.account_id === req.params.id);
     if (!acc) return problem(404, 'NOT_FOUND', 'This account is not connected here.');
-    Object.assign(acc, { state: 'CONNECTED', state_reason: null, permissions: acc.channel === 'instagram' ? ['instagram_content_publish'] : ['pages_manage_posts', 'pages_read_engagement'], connected_by: req.user.user_id, connected_at: new Date().toISOString(), expires_at: new Date(Date.now() + 90 * 864e5).toISOString(), formats: acc.channel === 'instagram' ? ['Feed image', 'Reel'] : ['Feed image', 'Feed video'] });
+    const caps = req.data.CHANNEL_CAPABILITIES?.[acc.channel];
+    Object.assign(acc, {
+      state: 'CONNECTED', state_reason: acc.publish_mode === 'MANUAL' ? 'No publishing API for this account type: posts are handed off to post by hand.' : null,
+      connected_by: req.user.user_id, connected_at: new Date().toISOString(), expires_at: new Date(Date.now() + 90 * 864e5).toISOString(),
+      ...(caps ? { permissions: [...caps.permissions], formats: [...caps.formats] } : {}),
+    });
     logActivity(req, 'reconnected', acc.name, '/marketing/integrations');
     return json(200, acc);
   },
@@ -571,11 +656,21 @@ const ROUTES: Record<string, Handler> = {
     if (earlier) return json(201, ws(req).publications.find((p) => p.publication_id === earlier.id));
     const approval = ws(req).approvals.find((a) => a.creative_id === b.creative_id && a.creative_version === b.creative_version && a.state === 'APPROVED');
     if (!approval) return problem(409, 'NOT_APPROVED', 'Only an approved version can be scheduled. This version has no current approval.');
-    const accounts = ws(req).accounts.filter((a) => b.account_ids?.includes(a.account_id));
+    const targets = b.targets ?? [];
+    const accounts = ws(req).accounts.filter((a) => targets.some((t) => t.account_id === a.account_id));
     const errs: FieldError[] = [];
-    if (!accounts.length) errs.push({ loc: ['body', 'account_ids'], msg: 'Choose at least one account.', type: 'missing' });
-    const unusable = accounts.find((a) => a.state !== 'CONNECTED' && a.state !== 'TEST_ONLY');
-    if (unusable) errs.push({ loc: ['body', 'account_ids'], msg: `${unusable.name} cannot publish: ${unusable.state_reason ?? 'reconnect it first.'}`, type: 'value_error' });
+    if (!accounts.length) errs.push({ loc: ['body', 'targets'], msg: 'Choose at least one account.', type: 'missing' });
+    // The server is the authority: every target is checked against what its account can take.
+    for (const a of accounts) {
+      const t = targets.find((x) => x.account_id === a.account_id)!;
+      const fail = (msg: string) => errs.push({ loc: ['body', 'targets'], msg: `${a.name}: ${msg}`, type: 'value_error' });
+      if (a.state !== 'CONNECTED' && a.state !== 'TEST_ONLY') fail(`cannot publish. ${a.state_reason ?? 'Reconnect it first.'}`);
+      else if (!a.formats.includes(t.format)) fail(`does not accept "${t.format}".`);
+      if (a.caption_max != null && codePoints(approval.caption) > a.caption_max) fail(`the caption is longer than ${a.caption_max} characters.`);
+      if (a.required_fields.includes('title') && !t.title?.trim()) fail('needs a title.');
+      if (a.required_fields.includes('privacy') && !t.privacy) fail('needs a privacy setting.');
+      if (a.required_fields.includes('ai_disclosure') && t.ai_disclosure == null) fail('needs the AI-content answer.');
+    }
     if (b.publish_at && Date.parse(b.publish_at) < Date.now() - 60_000) errs.push({ loc: ['body', 'publish_at'], msg: 'Choose a time in the future.', type: 'value_error' });
     if (errs.length) return fieldsProblem(errs);
     const pub = {
@@ -583,9 +678,14 @@ const ROUTES: Record<string, Handler> = {
       study_title: approval.study_title, caption: approval.caption, publish_at: b.publish_at ?? null, timezone: b.timezone ?? 'UTC',
       // Simulation never pretends a post went live: "now" stays queued.
       state: (b.publish_at ? 'SCHEDULED' : 'QUEUED') as Publication['state'],
-      state_reason: b.publish_at ? null : 'Queued in simulation. Nothing is sent to Facebook or Instagram.',
+      state_reason: b.publish_at ? null : 'Queued in simulation. Nothing is sent to any social network.',
       created_by: req.user.user_id, created_at: new Date().toISOString(),
-      channels: accounts.map((a) => ({ account_id: a.account_id, channel: a.channel, account_name: a.name, state: b.publish_at ? ('SCHEDULED' as const) : ('QUEUED' as const), permalink: null, error: null })),
+      // A manual account is handed off, never sent or shown as published.
+      channels: accounts.map((a) => ({
+        account_id: a.account_id, channel: a.channel, account_name: a.name, format: targets.find((t) => t.account_id === a.account_id)!.format,
+        state: a.publish_mode === 'MANUAL' ? ('MANUAL' as const) : b.publish_at ? ('SCHEDULED' as const) : ('QUEUED' as const),
+        permalink: null, error: null,
+      })),
     };
     ws(req).publications.unshift(pub);
     mockServer.idempotency.set(key, { payload: JSON.stringify(b), id: pub.publication_id });
@@ -603,6 +703,22 @@ const ROUTES: Record<string, Handler> = {
     pub.state_reason = 'Cancelled before sending.';
     pub.channels.forEach((c) => { c.state = 'CANCELLED'; });
     logActivity(req, 'cancelled', pub.publication_id, '/marketing/publications');
+    return json(200, pub);
+  },
+
+  'POST /publications/:id/reschedule': (req) => {
+    const denied = needCap(req, 'publication:manage');
+    if (denied) return denied;
+    const pub = ws(req).publications.find((p) => p.publication_id === req.params.id);
+    if (!pub) return problem(404, 'NOT_FOUND', 'This publication does not exist.');
+    if (pub.state !== 'SCHEDULED') return problem(409, 'NOT_RESCHEDULABLE', 'Only a scheduled post that has not been sent can be moved.');
+    const b = req.body as { publish_at?: string; timezone?: string };
+    if (!b.publish_at) return fieldsProblem([{ loc: ['body', 'publish_at'], msg: 'Choose a date and time.', type: 'missing' }]);
+    if (Date.parse(b.publish_at) < Date.now() - 60_000) return fieldsProblem([{ loc: ['body', 'publish_at'], msg: 'Choose a time in the future.', type: 'value_error' }]);
+    pub.publish_at = b.publish_at;
+    pub.timezone = b.timezone ?? pub.timezone;
+    logActivity(req, 'rescheduled', pub.publication_id, '/marketing/publications');
+    saveWorkspaces();
     return json(200, pub);
   },
 
@@ -639,6 +755,332 @@ const ROUTES: Record<string, Handler> = {
     m.roles = b.roles;
     logActivity(req, 'changed roles of', m.name, '/marketing/team');
     return json(200, m);
+  },
+
+  /* ---------- Client posts: validation only (NRC-41, proposed contract) ---------- */
+
+  'POST /client-uploads': (req) => {
+    const denied = needCap(req, 'creative:write');
+    if (denied) return denied;
+    const b = req.body as { file_name?: string; mime_type?: string; size_bytes?: number };
+    if (!b.file_name?.trim()) return fieldsProblem([{ loc: ['body', 'file_name'], msg: 'Choose a file to upload.', type: 'missing' }]);
+    const kind = b.mime_type?.startsWith('video/') ? 'video' as const : b.mime_type?.startsWith('image/') ? 'image' as const : null;
+    // As the server would after inspecting the bytes: wrong type, too large or unreadable files are rejected with a reason.
+    const reason = !kind ? 'Only images and videos can be checked.'
+      : (b.size_bytes ?? 0) > MAX_UPLOAD_BYTES ? 'The file is larger than 200 MB.'
+        : /corrupt/i.test(b.file_name) ? 'The file could not be read. It may be damaged; export it again and upload the new file.'
+          : null;
+    const media: MockClientMedia = {
+      tenant_id: req.tenantId ?? '', asset_id: `sim-upload-${crypto.randomUUID().slice(0, 8)}`,
+      kind: kind ?? 'image', file_name: b.file_name, mime_type: b.mime_type ?? 'application/octet-stream', size_bytes: b.size_bytes ?? 0,
+      width_px: kind === 'video' ? 1080 : 1080, height_px: kind === 'video' ? 1920 : 1080, duration_s: kind === 'video' ? 15 : null,
+      state: reason ? 'REJECTED' : 'READY', state_reason: reason,
+    };
+    mockServer.client().media.set(media.asset_id, media);
+    mockServer.saveClient();
+    return json(201, clientMediaRead(media));
+  },
+
+  'POST /client-posts': (req) => {
+    const denied = needCap(req, 'creative:write');
+    if (denied) return denied;
+    const key = req.idempotencyKey;
+    if (!key) return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key.', type: 'missing' }]);
+    const b = req.body as { study_id?: string; language?: string; channel?: string; post_format?: string; caption?: string | null; asset_ids?: string[] };
+    const payload = JSON.stringify(b);
+    const earlier = mockServer.idempotency.get(`${req.tenantId}:client:${key}`);
+    if (earlier) {
+      if (earlier.payload !== payload) return problem(409, 'IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request.');
+      return clientPostRead(req, 200, mockServer.client().posts.get(earlier.id)!);
+    }
+    const study = (req.data.STUDIES[req.tenantId ?? ''] ?? []).find((s) => s.study_id === b.study_id);
+    const errs = [...checkSetup(req.data, b), ...clientContentErrors(req, b.caption ?? null, b.asset_ids ?? [])];
+    if (!study) errs.push({ loc: ['body', 'study_id'], msg: 'Choose a study.', type: 'missing' });
+    else if (study.recruitment_status !== 'recruiting') errs.push({ loc: ['body', 'study_id'], msg: 'This study is closed to recruitment.', type: 'value_error' });
+    if (errs.length) return fieldsProblem(errs);
+    const now = new Date().toISOString();
+    const post: MockClientPost = {
+      tenant_id: req.tenantId ?? '', id: `sim-cp-${crypto.randomUUID().slice(0, 8)}`, version: 1,
+      study_id: b.study_id!, language: b.language as MockClientPost['language'], channel: b.channel as MockClientPost['channel'],
+      post_format: b.post_format as MockClientPost['post_format'], origin: 'CLIENT_UPLOAD', workflow_mode: 'VALIDATION_ONLY',
+      caption: b.caption?.trim() ? b.caption : null, asset_ids: b.asset_ids ?? [], created_by: req.user.user_id,
+      created_at: now, updated_at: now, change_note: 'Uploaded', history: [], generation_requests: 0,
+    };
+    mockServer.client().posts.set(post.id, post);
+    mockServer.saveClient();
+    mockServer.idempotency.set(`${req.tenantId}:client:${key}`, { payload, id: post.id });
+    return clientPostRead(req, 201, post);
+  },
+
+  'GET /client-posts/:id': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    return post ? clientPostRead(req, 200, post) : problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+  },
+
+  'PATCH /client-posts/:id': (req) => {
+    const denied = needCap(req, 'creative:write');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    if (!post) return problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+    if (!req.ifMatch) return problem(428, 'PRECONDITION_REQUIRED', 'Send If-Match with the version you edited.');
+    if (req.ifMatch !== `"${post.version}"`) {
+      return problem(412, 'VERSION_CONFLICT', 'The post changed since you loaded it. Reload it and try again.', false, { current_version: post.version });
+    }
+    const b = req.body as { caption?: string | null; asset_ids?: string[]; change_note?: string };
+    const caption = b.caption === undefined ? post.caption : b.caption?.trim() ? b.caption : null;
+    const assetIds = b.asset_ids ?? post.asset_ids;
+    const errs = clientContentErrors(req, caption, assetIds);
+    if (errs.length) return fieldsProblem(errs);
+    post.history.push({
+      version: post.version, caption: post.caption, asset_ids: post.asset_ids, change_note: post.change_note,
+      created_by: post.updated_by ?? post.created_by, created_at: post.updated_at,
+    });
+    post.caption = caption;
+    post.asset_ids = assetIds;
+    post.version += 1;
+    post.change_note = b.change_note?.trim() || 'Edited';
+    post.updated_at = new Date().toISOString();
+    post.updated_by = req.user.user_id;
+    mockServer.saveClient();
+    return clientPostRead(req, 200, post);
+  },
+
+  'POST /client-posts/:id/checks': (req) => {
+    const denied = needCap(req, 'validation:run');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    if (!post) return problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+    const key = req.idempotencyKey;
+    if (!key) return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key.', type: 'missing' }]);
+    const b = req.body as { post_version?: number };
+    const payload = JSON.stringify({ id: post.id, ...b });
+    const earlier = mockServer.idempotency.get(`${req.tenantId}:client-check:${key}`);
+    if (earlier) {
+      if (earlier.payload !== payload) return problem(409, 'IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request.');
+      return json(202, { check_id: earlier.id, state: 'QUEUED' });
+    }
+    if (b.post_version !== post.version) {
+      return problem(409, 'VERSION_CONFLICT', 'The post changed since you loaded it. Reload it and check the latest version.', false, { current_version: post.version });
+    }
+    const check = clientCheckOf(req, post);
+    mockServer.client().checks.set(check.final.check_id, check);
+    mockServer.saveClient();
+    mockServer.idempotency.set(`${req.tenantId}:client-check:${key}`, { payload, id: check.final.check_id });
+    return json(202, { check_id: check.final.check_id, state: 'QUEUED' });
+  },
+
+  'GET /client-posts/:id/checks/latest': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    if (!post) return problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+    const latest = [...mockServer.client().checks.values()]
+      .filter((c) => c.post_id === post.id && c.tenant_id === req.tenantId)
+      .sort((a, b) => b.started_ms - a.started_ms)[0];
+    return latest ? json(200, readClientCheck(latest, post)) : problem(404, 'NOT_FOUND', 'This post has not been checked yet.');
+  },
+
+  'GET /client-posts/:id/versions': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    if (!post) return problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+    const files = mockServer.client().media;
+    const checks = [...mockServer.client().checks.values()]
+      .filter((c) => c.post_id === post.id && c.tenant_id === req.tenantId)
+      .sort((a, b) => b.started_ms - a.started_ms);
+    const all = [
+      { version: post.version, caption: post.caption, asset_ids: post.asset_ids, change_note: post.change_note, created_by: post.updated_by ?? post.created_by, created_at: post.updated_at },
+      ...[...post.history].reverse(),
+    ];
+    const items = all.map((v) => {
+      const c = checks.find((x) => x.final.post_version === v.version);
+      const read = c ? readClientCheck(c, post) : null;
+      const createdBy = v.created_by ?? post.created_by;
+      return {
+        version: v.version, caption: v.caption, change_note: v.change_note,
+        media: v.asset_ids.flatMap((assetId) => { const m = files.get(assetId); return m?.tenant_id === req.tenantId ? [clientMediaRead(m)] : []; }),
+        created_by: createdBy, created_by_name: displayName(req, createdBy), created_at: v.created_at ?? post.created_at,
+        check: read && {
+          check_id: read.check_id, state: read.state, outcome: read.outcome, evaluated_at: read.evaluated_at,
+          has_coverage_gaps: read.parts.some((p) => p.coverage_gaps.length > 0),
+        },
+      };
+    });
+    return json(200, { items });
+  },
+
+  'POST /client-posts/:id/ai-fixes': (req) => {
+    const denied = needCap(req, 'generation:run');
+    if (denied) return denied;
+    const post = findClientPost(req);
+    if (!post) return problem(404, 'NOT_FOUND', 'This post does not exist or is not available to you.');
+    const key = req.idempotencyKey;
+    if (!key) return fieldsProblem([{ loc: ['header', 'Idempotency-Key'], msg: 'Send an Idempotency-Key.', type: 'missing' }]);
+    const b = req.body as { post_version?: number; asset_id?: string; instructions?: string | null };
+    const payload = JSON.stringify({ id: post.id, ...b });
+    const earlier = mockServer.idempotency.get(`${req.tenantId}:ai-fix:${key}`);
+    if (earlier) {
+      if (earlier.payload !== payload) return problem(409, 'IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request.');
+      return json(202, readAiFix(mockServer.client().fixes.get(earlier.id)!));
+    }
+    if (b.instructions && codePoints(b.instructions) > 500) {
+      return fieldsProblem([{ loc: ['body', 'instructions'], msg: 'Shorten the instructions to 500 characters.', type: 'string_too_long' }]);
+    }
+    if (b.post_version !== post.version) {
+      return problem(409, 'VERSION_CONFLICT', 'The post changed since you loaded it. Reload it and try again.', false, { current_version: post.version });
+    }
+    // Only an image the current, finished check flagged can be fixed.
+    const latest = [...mockServer.client().checks.values()]
+      .filter((c) => c.post_id === post.id && c.tenant_id === req.tenantId)
+      .sort((x, y) => y.started_ms - x.started_ms)[0];
+    const read = latest ? readClientCheck(latest, post) : null;
+    const part = read?.is_current && read.state === 'SUCCEEDED' ? read.parts.find((p) => p.asset_id === b.asset_id) : undefined;
+    if (part?.target !== 'image' || !part.findings.length) {
+      return problem(409, 'AI_FIX_NOT_ELIGIBLE', 'Only an image flagged by the check of the current version can be fixed with AI.');
+    }
+    const source = mockServer.client().media.get(b.asset_id ?? '')!;
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const fix: MockAiFix = {
+      tenant_id: post.tenant_id, fix_id: `sim-fix-${suffix}`, post_id: post.id, post_version: post.version, asset_id: source.asset_id,
+      instructions: b.instructions?.trim() || null, started_ms: Date.now(), created_by: req.user.user_id,
+      // No flagged words in the name: the fake checker reads the name as the text on the image.
+      result: {
+        tenant_id: post.tenant_id, asset_id: `sim-upload-${suffix}`, kind: 'image', file_name: `ai-fixed-image-${suffix}.png`, mime_type: 'image/png',
+        size_bytes: 600, width_px: source.width_px, height_px: source.height_px, duration_s: null, state: 'READY', state_reason: null, origin: 'ai_fix',
+      },
+    };
+    mockServer.client().fixes.set(fix.fix_id, fix);
+    mockServer.client().media.set(fix.result.asset_id, fix.result);
+    post.generation_requests = (post.generation_requests ?? 0) + 1;
+    mockServer.saveClient();
+    mockServer.idempotency.set(`${req.tenantId}:ai-fix:${key}`, { payload, id: fix.fix_id });
+    return json(202, readAiFix(fix));
+  },
+
+  'GET /client-posts/:id/ai-fixes/:fixId': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const fix = mockServer.client().fixes.get(req.params.fixId);
+    if (fix?.tenant_id !== req.tenantId || fix.post_id !== req.params.id) return problem(404, 'NOT_FOUND', 'This AI fix does not exist or is not available to you.');
+    return json(200, readAiFix(fix));
+  },
+
+  /* ---------- Generation usage and balance (NRC-44, proposed contract) ---------- */
+
+  'GET /usage/balance': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const u = req.data.USAGE?.[req.tenantId ?? ''];
+    return json(200, u?.balance ?? {
+      provider: 'Higgsfield (simulation)', currency: 'USD', source: 'UNAVAILABLE', amount: null, as_of: null,
+      reserved: '0.00', allocation: null, low_threshold: '5.00', recharge_url: null, provider_tokens: null,
+    });
+  },
+
+  'GET /usage/attempts': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const q = req.query;
+    const all = (req.data.USAGE?.[req.tenantId ?? '']?.attempts ?? [])
+      .filter((a) => (!q.get('model') || a.model === q.get('model'))
+        && (!q.get('creative_id') || a.creative_id === q.get('creative_id'))
+        && (!q.get('from') || a.created_at >= `${q.get('from')}T00:00:00Z`)
+        && (!q.get('to') || a.created_at <= `${q.get('to')}T23:59:59Z`))
+      .sort((x, y) => y.created_at.localeCompare(x.created_at));
+    const offset = Number(q.get('cursor') ?? 0) || 0;
+    const items = all.slice(offset, offset + USAGE_PAGE);
+    const sum = (pick: (a: (typeof all)[number]) => string | null) => sumMoney(all.map(pick).filter((v): v is string => v != null));
+    return json(200, {
+      items,
+      next_cursor: offset + USAGE_PAGE < all.length ? String(offset + USAGE_PAGE) : null,
+      totals: {
+        attempts: all.length,
+        estimated: sum((a) => a.estimated),
+        reserved: sum((a) => (a.status === 'RESERVED' ? a.estimated : null)),
+        confirmed: sum((a) => a.confirmed),
+        refunded: sum((a) => a.refunded),
+        unknown: all.filter((a) => a.status === 'UNKNOWN').length,
+      },
+    });
+  },
+
+  'GET /usage/prices': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    return req.data.PRICES ? json(200, req.data.PRICES) : problem(503, 'PRICES_UNAVAILABLE', 'Prices are not available right now.', true);
+  },
+
+  /* ---------- Dashboards (NRC-46, proposed contract in api/analytics.ts) ---------- */
+
+  'GET /analytics/dashboard': (req) => {
+    const denied = needCap(req, 'creative:read');
+    if (denied) return denied;
+    const q = req.query;
+    const from = q.get('from'); const to = q.get('to'); const workflow = q.get('workflow'); const setId = q.get('social_set_id');
+    const inRange = (iso: string | null) => !!iso && (!from || iso >= `${from}T00:00`) && (!to || iso <= `${to}T23:59:59Z`);
+
+    // Usage: the same attempts the usage page lists, so the two always agree.
+    const attempts = (req.data.USAGE?.[req.tenantId ?? '']?.attempts ?? [])
+      .filter((a) => inRange(a.created_at) && (!workflow || a.workflow === workflow));
+    const usable = attempts.filter((a) => a.outcome === 'USED');
+    const confirmed = sumMoney(attempts.map((a) => a.confirmed).filter((v): v is string => v != null));
+    const publications = ws(req).publications.filter((p) => inRange(p.publish_at ?? p.created_at));
+    const publishedPosts = new Set(publications.filter((p) => p.channels.some((c) => c.state === 'PUBLISHED')).map((p) => p.creative_id)).size;
+    const per = (n: number) => (n ? fromMicros(toMicros(confirmed) / BigInt(n)) : null);
+    const models = [...new Set(attempts.map((a) => a.model_label))].map((label) => {
+      const rows = attempts.filter((a) => a.model_label === label);
+      return { model_label: label, attempts: rows.length, usable: rows.filter((a) => a.outcome === 'USED').length, confirmed: sumMoney(rows.map((a) => a.confirmed ?? '0')) };
+    });
+
+    // Validation: every finished run in this organisation.
+    const runs = [...mockServer.runs(req.data.VALIDATION_RUNS).values()]
+      .filter((r) => r.tenant_id === req.tenantId && r.final.state === 'SUCCEEDED' && (!r.final.evaluated_at || inRange(r.final.evaluated_at)));
+    const counts = new Map<string, number>();
+    for (const r of runs) for (const f of r.final.findings) counts.set(f.rule_id, (counts.get(f.rule_id) ?? 0) + 1);
+    const rule = (id: string) => req.data.VALIDATION_RULES.find((x) => x.rule_id === id);
+
+    // Social: per account only; a figure the network does not report stays null.
+    const accounts = ws(req).accounts.filter((a) => !setId || a.social_set_id === setId);
+    const channelState = (s: string) => publications.flatMap((p) => p.channels).filter((c) => accounts.some((a) => a.account_id === c.account_id) && c.state === s).length;
+
+    return json(200, {
+      generated_at: new Date().toISOString(),
+      usage: {
+        freshness: { as_of: req.data.USAGE?.[req.tenantId ?? ''] ? new Date(Date.now() - 10 * 60_000).toISOString() : null, partial: attempts.some((a) => a.status === 'UNKNOWN') ? 'Some attempts are not billed yet; their estimates are shown apart.' : null },
+        attempts: attempts.length, usable_outputs: usable.length, published_posts: publishedPosts,
+        confirmed, unconfirmed_estimate: sumMoney(attempts.filter((a) => a.confirmed == null).map((a) => a.estimated)),
+        cost_per_usable: per(usable.length), cost_per_published: per(publishedPosts),
+        median_latency_s: attempts.length ? 38 : null,
+        by_model: models,
+      },
+      validation: {
+        freshness: { as_of: new Date(Date.now() - 2 * 60_000).toISOString(), partial: null },
+        runs: runs.length,
+        pass: runs.filter((r) => r.final.outcome === 'PASS').length,
+        fail: runs.filter((r) => r.final.outcome === 'FAIL').length,
+        needs_review: runs.filter((r) => r.final.outcome === 'NEEDS_REVIEW').length,
+        unable_to_assess: runs.filter((r) => r.final.rule_results.some((x) => x.mandatory && x.result === 'UNABLE_TO_ASSESS')).length,
+        avg_correction_rounds: runs.some((r) => r.final.outcome === 'PASS') ? 2.3 : null,
+        top_rules: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([id, n]) => ({ rule_id: id, title: rule(id)?.explanation ?? id, findings: n })),
+      },
+      social: {
+        freshness: { as_of: new Date(Date.now() - 6 * 3600_000).toISOString(), partial: 'Networks update their figures at different times; some accounts report none.' },
+        published: channelState('PUBLISHED'), failed: channelState('FAILED'), unknown: channelState('UNKNOWN'), partial: publications.filter((p) => p.state === 'PARTIAL').length, manual: channelState('MANUAL'),
+        by_account: accounts.map((a) => {
+          const m = req.data.SOCIAL_METRICS?.[a.account_id];
+          return {
+            account_id: a.account_id, channel: a.channel, account_name: a.name,
+            posts: publications.filter((p) => p.channels.some((c) => c.account_id === a.account_id && c.state === 'PUBLISHED')).length,
+            impressions: m?.impressions ?? null, engagements: m?.engagements ?? null, video_views: m?.video_views ?? null,
+            unavailable_reason: m ? null : a.publish_mode === 'MANUAL' ? 'Posted by hand: no figures come back.' : 'The network has not reported figures for this account.',
+          };
+        }),
+      },
+    });
   },
 
   /* Simulation tools, for testing failure paths by hand and in e2e. */
@@ -737,7 +1179,9 @@ function readRun(run: MockValidationRun, c: MockCreative): ValidationRunRead {
       evaluated_at: null, gates: [], rule_results: [], findings: [], coverage_gaps: [],
     };
   }
-  return { ...run.final, is_current, evaluated_at: run.final.evaluated_at ?? new Date(run.started_ms + RUNNING_MS).toISOString() };
+  // A visibly fake replacement for findings with a span and advice, so "Use the suggested wording" can be tried (NRC-22; real wording comes from NRC-11).
+  const findings = run.final.findings.map((f) => ({ ...f, replacement_text: f.text_span && f.suggested_correction ? '[approved wording]' : null }));
+  return { ...run.final, findings, is_current, evaluated_at: run.final.evaluated_at ?? new Date(run.started_ms + RUNNING_MS).toISOString() };
 }
 
 const summaryOf = (r: ValidationRunRead) => ({
@@ -776,7 +1220,7 @@ function readJob(j: MockJob): Schemas['JobRead'] {
   const t = Date.now() - j.started_ms;
   const [state, stage] = t < 600 ? (['QUEUED', null] as const)
     : t < 1500 ? (['RUNNING', 'submitting'] as const)
-      : t < JOB_DONE_MS ? (['WAITING_PROVIDER', 'generating'] as const)
+      : t < JOB_DONE_MS ? (['WAITING_PROVIDER', 'waiting_provider'] as const)
         : (['SUCCEEDED', 'stored'] as const);
   const done = state === 'SUCCEEDED';
   return {
@@ -829,15 +1273,132 @@ function assetRead(a: MockAsset) {
   };
 }
 
-function placeholderImage(w: number, h: number, caption = 'Simulation image') {
+function placeholderImage(w: number, h: number, caption = 'Simulation image', note = 'Not a real generated image') {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dbe7f3"/><stop offset="1" stop-color="#eef2e6"/></linearGradient></defs>'
     + `<rect width="${w}" height="${h}" fill="url(#g)"/>`
     + `<rect x="${w * 0.12}" y="${h * 0.55}" width="${w * 0.76}" height="${h * 0.22}" rx="24" fill="#ffffff" opacity="0.8"/>`
     + `<text x="50%" y="${h * 0.64}" text-anchor="middle" font-family="sans-serif" font-size="${w * 0.045}" fill="#334155">${caption.replace(/[<&>]/g, '')}</text>`
-    + `<text x="50%" y="${h * 0.71}" text-anchor="middle" font-family="sans-serif" font-size="${w * 0.03}" fill="#64748b">Not a real generated image</text>`
+    + `<text x="50%" y="${h * 0.71}" text-anchor="middle" font-family="sans-serif" font-size="${w * 0.03}" fill="#64748b">${note.replace(/[<&>]/g, '')}</text>`
     + '</svg>';
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/* ---------- Client post helpers (NRC-41) ---------- */
+
+const MAX_UPLOAD_BYTES = 200_000_000;
+/** Attempts per page of the usage list (NRC-44). */
+const USAGE_PAGE = 8;
+
+const findClientPost = (req: MockRequest): MockClientPost | undefined => {
+  const p = mockServer.client().posts.get(req.params.id);
+  return p?.tenant_id === req.tenantId ? p : undefined;
+};
+
+function clientMediaRead(m: MockClientMedia) {
+  const { tenant_id: _tenant, origin, ...media } = m;
+  const label = m.kind === 'video' ? `Video: ${m.file_name}` : origin === 'ai_fix' ? 'AI fixed image' : m.file_name;
+  const note = origin === 'ai_fix' ? 'Simulation: not a real generated image' : 'Simulation stand-in for the uploaded file';
+  return { ...media, preview_url: m.state === 'READY' ? placeholderImage(m.width_px ?? 1080, m.height_px ?? 1080, label, note) : null };
+}
+
+/** An AI fix as it reads now: queued, then running, then its new picture. "fail" in the instructions makes it fail. */
+function readAiFix(f: MockAiFix): AiFix {
+  const elapsed = Date.now() - f.started_ms;
+  const base = { fix_id: f.fix_id, post_id: f.post_id, post_version: f.post_version, asset_id: f.asset_id, generation_requests: 1, created_at: new Date(f.started_ms).toISOString() };
+  if (elapsed < RUNNING_MS) return { ...base, state: elapsed < QUEUED_MS ? 'QUEUED' : 'RUNNING', result: null, error: null };
+  if (f.instructions && /\bfail\b/i.test(f.instructions)) return { ...base, state: 'FAILED', result: null, error: 'The new image could not be made. Try again, or replace the file yourself.' };
+  return { ...base, state: 'SUCCEEDED', result: clientMediaRead(f.result), error: null };
+}
+
+/** Strips the internal fields, puts the files in, and sends the ETag header. */
+function clientPostRead(req: MockRequest, status: number, p: MockClientPost) {
+  const { tenant_id: _tenant, asset_ids, history: _history, updated_by: _by, ...post } = p;
+  const files = mockServer.client().media;
+  const media = asset_ids.flatMap((assetId) => { const m = files.get(assetId); return m?.tenant_id === req.tenantId ? [clientMediaRead(m)] : []; });
+  return json(status, { ...post, media, generation_requests: p.generation_requests ?? 0 }, { ETag: `"${p.version}"` });
+}
+
+/** A post needs a caption or files; files are up to 10 ready images or one ready video, never both. */
+function clientContentErrors(req: MockRequest, caption: string | null, assetIds: string[]): FieldError[] {
+  const errs: FieldError[] = [];
+  if (caption && codePoints(caption) > CAPTION_MAX) errs.push({ loc: ['body', 'caption'], msg: `Shorten the caption to ${CAPTION_MAX} characters.`, type: 'string_too_long' });
+  if (!caption?.trim() && !assetIds.length) errs.push({ loc: ['body', 'caption'], msg: 'Add the caption, the files, or both.', type: 'missing' });
+  const files = assetIds.map((assetId) => mockServer.client().media.get(assetId));
+  if (files.some((m) => m?.tenant_id !== req.tenantId || m.state !== 'READY')) {
+    errs.push({ loc: ['body', 'asset_ids'], msg: 'Remove the files that are not ready.', type: 'value_error' });
+  }
+  const videos = files.filter((m) => m?.kind === 'video').length;
+  if (videos && (videos > 1 || files.length > 1)) errs.push({ loc: ['body', 'asset_ids'], msg: 'A post holds images or one video, not both.', type: 'value_error' });
+  if (!videos && files.length > 10) errs.push({ loc: ['body', 'asset_ids'], msg: 'A carousel holds up to 10 images.', type: 'value_error' });
+  return errs;
+}
+
+/**
+ * The fake combined check. It proves nothing about compliance: the caption is
+ * checked with the placeholder rules; for an image or video only the words in
+ * its file name stand in for the text read from it; pictures, audio and
+ * scenes are not inspected. A video is never passed. No generation request is made.
+ */
+function clientCheckOf(req: MockRequest, post: MockClientPost): MockClientCheck {
+  const rules = req.data.VALIDATION_RULES;
+  const files = mockServer.client().media;
+  const parts: ClientCheck['parts'] = [];
+  if (post.caption) {
+    const r = evaluate(post.caption, rules);
+    // A visibly fake replacement, so the comparison and accept steps can be tried; real wording comes from NRC-11.
+    const findings = r.findings.map((f) => ({ ...f, replacement_text: f.text_span && f.suggested_correction ? '[approved wording]' : null }));
+    parts.push({ target: 'caption', asset_id: null, state: 'SUCCEEDED', ...r, findings });
+  }
+  for (const assetId of post.asset_ids) {
+    const m = files.get(assetId);
+    if (!m) continue;
+    const read = m.file_name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
+    const r = evaluate(read, rules.filter((x) => x.check.kind === 'phrases'));
+    const findings = r.findings.map((f) => ({
+      ...f, text_span: null,
+      image_region: m.kind === 'image' ? { x: 0.12, y: 0.55, width: 0.76, height: 0.22 } : null,
+      time_range: m.kind === 'video' ? { start_s: 3, end_s: 6 } : null,
+    }));
+    if (m.kind === 'image') {
+      parts.push({
+        target: 'image', asset_id: assetId, state: 'SUCCEEDED', ...r, findings,
+        coverage_gaps: [{ rule_id: null, reason: 'Simulation: only the text on the image is checked; the picture itself is not inspected.' }],
+      });
+    } else {
+      parts.push({
+        target: 'video', asset_id: assetId, state: 'SUCCEEDED', outcome: r.outcome === 'FAIL' ? 'FAIL' : 'NEEDS_REVIEW', gates: [{ gate: 'media', outcome: r.outcome === 'FAIL' ? 'FAIL' : 'NEEDS_REVIEW' }],
+        rule_results: [...r.rule_results, { rule_id: 'SIM-VID-1', rule_version: 1, mandatory: true, result: 'UNABLE_TO_ASSESS', reason: 'Video checks (audio, on-screen text and scenes) are not available yet.' }],
+        findings,
+        coverage_gaps: [{ rule_id: 'SIM-VID-1', reason: 'Video checks (audio, on-screen text and scenes) are not available yet. A person must review the video.' }],
+      });
+    }
+  }
+  const outcomes = parts.map((p) => p.outcome);
+  const outcome = outcomes.includes('FAIL') ? 'FAIL' : outcomes.includes('NEEDS_REVIEW') ? 'NEEDS_REVIEW' : 'PASS';
+  const study = (req.data.STUDIES[post.tenant_id] ?? []).find((s) => s.study_id === post.study_id);
+  return {
+    tenant_id: post.tenant_id, post_id: post.id, started_ms: Date.now(),
+    final: {
+      check_id: `sim-check-${crypto.randomUUID().slice(0, 8)}`, post_id: post.id, post_version: post.version,
+      state: 'SUCCEEDED', outcome, is_current: true, evaluated_at: null,
+      study_snapshot_version: study?.version ?? 1, policy_bundle_version: req.data.POLICY_BUNDLE_VERSION,
+      parts, generation_requests: 0,
+    },
+  };
+}
+
+/** The check as it reads now: queued, then running, then its result. Not current once the post moved on. */
+function readClientCheck(c: MockClientCheck, post: MockClientPost): ClientCheck {
+  const elapsed = Date.now() - c.started_ms;
+  const is_current = c.final.post_version === post.version;
+  if (elapsed < RUNNING_MS) {
+    return {
+      ...c.final, state: elapsed < QUEUED_MS ? 'QUEUED' : 'RUNNING', outcome: null, is_current, evaluated_at: null,
+      parts: c.final.parts.map((p) => ({ ...p, state: 'RUNNING', outcome: null, gates: [], rule_results: [], findings: [], coverage_gaps: [] })),
+    };
+  }
+  return { ...c.final, is_current, evaluated_at: new Date(c.started_ms + RUNNING_MS).toISOString() };
 }
 
 /* ---------- Workspace helpers ---------- */

@@ -1,0 +1,199 @@
+{
+  "policy_bundle_id": "a1d4c7e2-8b3f-4e6a-9c5d-2f7b1e8a4c06",
+  "version": 1,
+  "name": "[SYNTHETIC] Staging recruitment advertising rules",
+  "lifecycle_state": "ACTIVE",
+  "is_synthetic": true,
+  "rules": [
+    {
+      "rule_id": "REC-01",
+      "rule_version": 1,
+      "title": "No safety or effectiveness claims",
+      "requirement": "Do not state or imply that the investigational treatment is safe or effective for the condition being studied.",
+      "gate": "policy",
+      "severity": "critical",
+      "mandatory": true,
+      "check_type": "semantic",
+      "exact_wording": null,
+      "prohibited_phrases": [
+        "safe and effective",
+        "proven",
+        "cure",
+        "cures"
+      ],
+      "applicability": {
+        "input_kinds": [
+          "brief",
+          "text",
+          "image"
+        ],
+        "channels": [],
+        "post_formats": [],
+        "languages": [],
+        "audiences": [],
+        "jurisdictions": [],
+        "study_specific": false,
+        "effective_from": null,
+        "effective_to": null
+      },
+      "sources": [
+        {
+          "source_title": "[SYNTHETIC] Paraphrased public FDA guidance",
+          "clause_ref": "FDA-1",
+          "section": "Claims of safety or effectiveness",
+          "page": 1,
+          "language": "en",
+          "excerpt": "[SYNTHETIC] Recruitment material must not say or suggest that an investigational treatment is safe or effective for the condition under study."
+        },
+        {
+          "source_title": "[SYNTHETIC] Paraphrased public FDA guidance",
+          "clause_ref": "FDA-1-ES",
+          "section": "Afirmaciones de seguridad o eficacia",
+          "page": 1,
+          "language": "es",
+          "excerpt": "[SYNTHETIC] El material de reclutamiento no debe decir ni sugerir que un tratamiento en investigación es seguro, eficaz o que cura la enfermedad en estudio."
+        }
+      ],
+      "disclosures": [],
+      "interpretations": [],
+      "examples": [],
+      "exceptions": []
+    },
+    {
+      "rule_id": "REC-06",
+      "rule_version": 1,
+      "title": "Payment not emphasised",
+      "requirement": "Payment may be mentioned but must not be emphasised, for example by large or bold type or by leading with the amount.",
+      "gate": "policy",
+      "severity": "major",
+      "mandatory": false,
+      "check_type": "semantic",
+      "exact_wording": null,
+      "prohibited_phrases": [],
+      "applicability": {
+        "input_kinds": [
+          "text",
+          "image"
+        ],
+        "channels": [],
+        "post_formats": [],
+        "languages": [],
+        "audiences": [],
+        "jurisdictions": [],
+        "study_specific": false,
+        "effective_from": null,
+        "effective_to": null
+      },
+      "sources": [
+        {
+          "source_title": "[SYNTHETIC] Paraphrased public FDA guidance",
+          "clause_ref": "FDA-6",
+          "section": "Emphasis on payment",
+          "page": 6,
+          "language": "en",
+          "excerpt": "[SYNTHETIC] Payment may be mentioned but must not be emphasised, for example by large type or by leading with the amount."
+        }
+      ],
+      "disclosures": [],
+      "interpretations": [],
+      "examples": [],
+      "exceptions": [
+        {
+          "node_key": "EXC-01",
+          "language": "en",
+          "text": "[SYNTHETIC] Compensation may be mentioned when the study snapshot has an approved compensation statement.",
+          "requires_study_fact": "compensation_statement",
+          "applicability": {
+            "input_kinds": [],
+            "channels": [],
+            "post_formats": [],
+            "languages": [],
+            "audiences": [],
+            "jurisdictions": [],
+            "study_specific": false,
+            "effective_from": null,
+            "effective_to": null
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "REC-07",
+      "rule_version": 1,
+      "title": "Research and voluntary disclosure",
+      "requirement": "Say that this is a research study and that taking part is voluntary, using the study's required disclosures.",
+      "gate": "completeness",
+      "severity": "critical",
+      "mandatory": true,
+      "check_type": "deterministic",
+      "exact_wording": null,
+      "prohibited_phrases": [],
+      "applicability": {
+        "input_kinds": [
+          "text"
+        ],
+        "channels": [],
+        "post_formats": [],
+        "languages": [],
+        "audiences": [],
+        "jurisdictions": [],
+        "study_specific": false,
+        "effective_from": null,
+        "effective_to": null
+      },
+      "sources": [],
+      "disclosures": [
+        {
+          "node_key": "DISC-01",
+          "language": "en",
+          "text": "This is a research study. Taking part is voluntary."
+        },
+        {
+          "node_key": "DISC-01-ES",
+          "language": "es",
+          "text": "Este es un estudio de investigación. La participación es voluntaria."
+        }
+      ],
+      "interpretations": [],
+      "examples": [],
+      "exceptions": []
+    },
+    {
+      "rule_id": "REC-08",
+      "rule_version": 1,
+      "title": "Approved study facts only",
+      "requirement": "Statements about the condition, eligibility, sites and compensation must match the approved study snapshot.",
+      "gate": "study_facts",
+      "severity": "critical",
+      "mandatory": true,
+      "check_type": "deterministic",
+      "exact_wording": null,
+      "prohibited_phrases": [],
+      "applicability": {
+        "input_kinds": [
+          "brief",
+          "text"
+        ],
+        "channels": [],
+        "post_formats": [],
+        "languages": [],
+        "audiences": [],
+        "jurisdictions": [],
+        "study_specific": false,
+        "effective_from": null,
+        "effective_to": null
+      },
+      "sources": [],
+      "disclosures": [],
+      "interpretations": [
+        {
+          "node_key": "INT-01",
+          "language": "en",
+          "text": "[SYNTHETIC] Ages, eligibility and compensation in the copy must match the approved study snapshot."
+        }
+      ],
+      "examples": [],
+      "exceptions": []
+    }
+  ]
+}

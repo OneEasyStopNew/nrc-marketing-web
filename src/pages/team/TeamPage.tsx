@@ -17,8 +17,7 @@ import { EmptyState, PageHeader, Tabs } from '@/components/ui/Misc';
 import { Modal } from '@/components/ui/Overlay';
 import { useToast } from '@/components/ui/Toast';
 import { useMembers, useWorkspaceMutation } from '@/pages/shared/queries';
-import { IN_DEVELOPMENT } from '@/config/inDevelopment';
-import { InDevelopment, QueryState, ROLE_LABEL, useIsSimulation } from '@/pages/shared/ui';
+import { InDevelopment, QueryState, ROLE_LABEL, useIsSimulation, useInDevelopment } from '@/pages/shared/ui';
 
 type Role = Member['roles'][number];
 type Filter = 'ACTIVE' | 'INVITED' | 'SUSPENDED';
@@ -43,8 +42,9 @@ const STATUS_BADGE: Record<Member['status'], { label: string; tone: 'done' | 'wa
  * manages roles inside the tenant.
  */
 export default function TeamPage(): ReactElement {
+  const teamInDev = useInDevelopment('team');
   // Not fetched while team management is in development: the backend has no /members yet.
-  const members = useMembers(!IN_DEVELOPMENT.team);
+  const members = useMembers(!teamInDev);
   const [filter, setFilter] = useState<Filter>('ACTIVE');
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<Member | 'new' | null>(null);
@@ -56,7 +56,7 @@ export default function TeamPage(): ReactElement {
   }, [all, filter, search]);
 
   // Team management is in no ticket yet (config/inDevelopment.ts).
-  if (IN_DEVELOPMENT.team) {
+  if (teamInDev) {
     return (
       <VStack gap={8}>
         <PageHeader title="Team" description="Who works in Marketing for this organisation, and what each person may do." />
