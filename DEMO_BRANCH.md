@@ -13,13 +13,23 @@ never merge it. The real work goes to `main` through the normal feature branches
 | Validate a caption | Same draft → **Check caption** | `POST /validations` (`input_kind: text`) |
 | Results | Opens after either button: verdict, the checks per gate, findings with severity, highlighted text, suggested correction, source rule | `GET /validations/{id}`, `GET /validations/{id}/context` |
 | Active rules | Rules in the menu | `GET /policies/active` |
+| Rulebooks (NRC-20) | Rules → **Rulebooks**: every version with its status; open one for details, blocking problems, rules with their links, coverage and history | `GET /policy-bundles`, `.../{id}`, `/rule-records`, `/nodes`, `/edges`, `/checks`, `/audit` |
+| Status buttons | On a version: **Send for review**, **Approve**, **Reject**, **Return to draft**, **Build again**, **Activate**, **Roll back**, **Retire**, each only for the role the API allows; the others are named ("Approve: only the policy owner can do this") | `POST .../transitions` with If-Match |
+| Review | **Approve** / **Reject** on each unreviewed rule, wording, exception, disclosure or link, for the role that reviews that kind | `POST .../review-decisions` |
+| Edit a draft | **Add a rule**, **Edit**, **Add wording**; **New draft from version N** on any version | `POST .../rules`, `PATCH .../rules/{id}`, `POST .../wordings`, `POST /policy-bundles` |
+| Policy files | Rulebooks → **Policy files**: list, upload (PDF, text, Markdown up to 50 MB), clauses per file | `/policy-sources/uploads…`, `POST/GET /policy-sources`, `/clauses` |
 
 Handled from the contract: per-rule `NEEDS_REVIEW`, 429 `VALIDATION_LIMIT_REACHED` (shown as a
-retryable message), and `suggested_correction` on findings.
+retryable message), `suggested_correction` on findings, 409 `POLICY_BUNDLE_STATE` and
+`POLICY_BUNDLE_HAS_ISSUES` (the issues are listed in the dialog), 412 on a stale revision.
 
-Not built yet: the policy administration screens (NRC-20: policy files, bundles, review,
-approve, build, activate, roll back, retire). The image download (`GET /creatives/{id}/export`)
-answers 501 on the API branch; the screens carry on without it.
+The image download (`GET /creatives/{id}/export`) answers 501 on the API branch; the screens carry
+on without it.
+
+For the policy screens, also run `python -m app.workers.policy` (index builds and clause
+reading) and `python -m app.workers.media` (file scans), with `POLICY_SOURCE_BUCKET` set in the
+API's `.env` (locally the SeaweedFS bucket, e.g. `nrc-local-media`). Sign in as `dev-admin`
+(policy_admin) or `dev-approver` (policy_approver) to see each role's buttons.
 
 ## Run it
 
@@ -73,3 +83,13 @@ the API's `DEMO_BRANCH.md`:
 Sample 2: `scripts/seed_demo.py` gives REC-07 `applies_to: ["text"]`, so a brief is never checked
 for the disclosure. Either the sample table should say "check as caption", or REC-07 should also
 apply to `brief`.
+
+Policy screens, same day, against the API branch with the policy and media workers running:
+
+- As `dev-admin`: list, open a version, **New draft**, **Add a rule**, review it, **Send for
+  review**, and uploading a Markdown file (sent, scanned, registered, clauses read) all worked.
+- As `dev-approver`: **Approve** on the version in review was refused with 409
+  `POLICY_BUNDLE_HAS_ISSUES` (*Source missing*, *Language es is not supported*). That came from the
+  test rules added to that draft; the dialog listed the issues as intended. A successful approve
+  and activate were not run end to end on this branch yet.
+- The policy lists answer 422 above `limit=50`; the screens ask for 50.
