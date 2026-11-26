@@ -110,6 +110,22 @@ async function read<S extends z.ZodType>(res: Response, schema: S, what: string)
   return parsed.data;
 }
 
+/**
+ * Sends a file to a signed storage address (an upload's `upload` target). Only
+ * the headers the API gave go with it: no token and no tenant header, because
+ * the address itself grants access. The address is secret and short-lived, so
+ * it is never logged or kept.
+ */
+export async function sendFile(target: { url: string; method: string; headers: Record<string, string> } & Record<string, unknown>, file: Blob): Promise<void> {
+  let res: Response;
+  try {
+    res = await cfg.fetch(target.url, { method: target.method, headers: target.headers, body: file, credentials: 'omit' });
+  } catch {
+    throw new ApiError(0);
+  }
+  if (!res.ok) throw new ApiError(res.status, { code: 'UPLOAD_FAILED', message: 'The file could not be sent. Try again; if it keeps failing, start the upload again.' });
+}
+
 /** A response body plus the headers the app acts on. */
 export interface ApiResponse<T> {
   data: T;

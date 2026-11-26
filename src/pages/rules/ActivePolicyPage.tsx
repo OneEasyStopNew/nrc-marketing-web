@@ -31,6 +31,8 @@ import {
   RULE_ADMIN_PATH,
   type PolicyFilter,
 } from './activePolicy';
+import { RULEBOOKS_PATH } from './admin/paths';
+import { useCanReadRulebooks } from './admin/useRulebooks';
 
 /**
  * Rules (NRC-20 demo slice): the tenant's active policy, read-only. Shows the
@@ -41,6 +43,7 @@ import {
 export default function ActivePolicyPage(): ReactElement {
   const policy = useActivePolicy();
   const { can } = useAuth();
+  const rulebooks = useCanReadRulebooks();
   const { context } = useSession();
   const state = policyLoadState(policy, !!context.active_policy);
 
@@ -50,10 +53,11 @@ export default function ActivePolicyPage(): ReactElement {
         title="Rules"
         description="The active policy that every brief, caption and image is checked against. Read-only."
         actions={
-          can('policy:manage') ? (
-            <Button variant="secondary" href={RULE_ADMIN_PATH}>
-              Manage rules
-            </Button>
+          rulebooks || can('policy:manage') ? (
+            <>
+              {rulebooks && <Button variant="secondary" href={RULEBOOKS_PATH}>Rulebooks</Button>}
+              {can('policy:manage') && <Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button>}
+            </>
           ) : undefined
         }
       />

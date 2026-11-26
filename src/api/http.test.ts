@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { configureHttp, http, setTenant, TENANT_HEADER, type TokenSource } from './http';
+import { configureHttp, http, sendFile, setTenant, TENANT_HEADER, type TokenSource } from './http';
 import { ApiError } from './errors';
 
 const json = (status: number, body?: unknown) =>
@@ -136,5 +136,29 @@ describe('http', () => {
   it('keeps fields the app does not know yet out of the result instead of failing', async () => {
     configureHttp({ baseUrl: '', fetch: () => Promise.resolve(json(200, { ok: true, added_later: 1 })), tokens: tokens('a1', null) });
     await expect(http.get('/me', Ok)).resolves.toEqual({ ok: true });
+  });
+});
+
+describe('sendFile: the file goes to the signed address on its own', () => {
+  it('sends only the headers the API gave, never the token or the tenant', async () => {
+    const seen: { url: string; init: RequestInit | undefined }[] = [];
+    configureHttp({
+      baseUrl: '/api', tenantId: 'tenant-1',
+      tokens: { getAccessToken: () => 'secret-token', refresh: () => Promise.resolve(null), onUnauthenticated: () => undefined },
+      fetch: (input, init) => { seen.push({ url: input as string, init }); return Promise.resolve(new Response(null, { status: 200 })); },
+    });
+    const file = new Blob(['[SYNTHETIC] policy text'], { type: 'text/plain' });
+    await sendFile({ url: 'https://storage.example.test/signed', method: 'PUT', headers: { 'Content-Type': 'text/plain' }, expires_at: '2026-11-26T10:00:00Z' }, file);
+    expect(seen[0]?.url).toBe('https://storage.example.test/signed');
+    expect(seen[0]?.init?.method).toBe('PUT');
+    expect(seen[0]?.init?.headers).toEqual({ 'Content-Type': 'text/plain' });
+    expect(seen[0]?.init?.body).toBe(file);
+  });
+
+  it('fails as an API error when storage refuses the file', async () => {
+    configureHttp({ fetch: () => Promise.resolve(new Response(null, { status: 403 })) });
+    const err: unknown = await sendFile({ url: 'https://storage.example.test/signed', method: 'PUT', headers: {}, expires_at: '2026-11-26T10:00:00Z' }, new Blob(['x']))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
   });
 });

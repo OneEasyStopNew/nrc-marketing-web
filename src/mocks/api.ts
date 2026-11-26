@@ -2,7 +2,7 @@ import { API_PREFIX } from '@/config/env';
 import { TENANT_HEADER } from '@/api/http';
 import type { Capability, ContextWire, MeWire } from '@/api/session';
 import { CAPTION_MAX, PROMPT_MAX, type Creative } from '@/api/creatives';
-import type { DummyUser, MockAiFix, MockAsset, MockClientCheck, MockClientMedia, MockClientPost, MockCreative, MockData, MockJob, MockValidationRun } from './types';
+import type { DummyUser, MockAiFix, MockAsset, MockClientCheck, MockClientMedia, MockClientPost, MockCreative, MockData, MockJob, MockPolicyBundle, MockPolicySource, MockValidationRun, MockWorkspace } from './types';
 import type { AiFix, ClientCheck } from '@/api/clientPosts';
 import { fromMicros, sumMoney, toMicros } from '@/api/usage';
 import type { Schemas } from '@/api/schemas.gen';
@@ -495,6 +495,274 @@ const ROUTES: Record<string, Handler> = {
     saveWorkspaces();
     return new Response(null, { status: 204 });
   },
+
+  /* ---------- Policy administration (NRC-20 on Firoz's NRC-4 contract, api/policyAdmin.ts) ---------- */
+
+  'GET /policy-bundles': (req) => {
+    const denied = needPolicyReader(req);
+    if (denied) return denied;
+    const state = req.query.get('state');
+    const before = Number(req.query.get('before_version')) || Number.POSITIVE_INFINITY;
+    const limit = Number(req.query.get('limit')) || 20;
+    if (limit > 50) return tooBig();
+    const all = policyBundlesOf(req).map((b) => b.detail)
+      .filter((d) => (!state || d.lifecycle_state === state) && d.version < before)
+      .sort((a, b) => b.version - a.version);
+    const items = all.slice(0, limit);
+    return json(200, { items, next_cursor: all.length > limit ? items[items.length - 1].version : null });
+  },
+
+  'GET /policy-bundles/:id': (req) => withPolicyBundle(req, (b) => json(200, b.detail, { ETag: `"${b.detail.revision}"` })),
+
+  'GET /policy-bundles/:id/rule-records': (req) => withPolicyBundle(req, (b) => {
+    // Proposed items are left out unless include_proposals=true, which needs policy:manage.
+    const proposals = req.query.get('include_proposals') === 'true';
+    if (proposals) {
+      const denied = needCap(req, 'policy:manage');
+      if (denied) return denied;
+      return json(200, { items: b.rules });
+    }
+    const approved = b.rules.filter((r) => r.node.review_state === 'APPROVED')
+      .map((r) => ({ ...r, wordings: r.wordings.filter((w) => w.review_state === 'APPROVED') }));
+    return json(200, { items: approved });
+  }),
+
+  'GET /policy-bundles/:id/nodes': (req) => withPolicyBundle(req, (b) => json(200, { items: [...b.rules.map((r) => r.node), ...b.nodes] })),
+  'GET /policy-bundles/:id/edges': (req) => withPolicyBundle(req, (b) => json(200, { items: b.edges })),
+  'GET /policy-bundles/:id/checks': (req) => withPolicyBundle(req, (b) => json(200, { issues: b.issues })),
+  'GET /policy-bundles/:id/audit': (req) => withPolicyBundle(req, (b) => (Number(req.query.get('limit')) > 50 ? tooBig() : json(200, { items: b.audit, next_cursor: null }))),
+
+  'POST /policy-bundles/:id/transitions': (req) => withPolicyBundle(req, (b) => {
+    const { command, reason } = (req.body ?? {}) as { command?: BundleCommand; reason?: string | null };
+    const step = command ? POLICY_STEPS[command] : undefined;
+    if (!command || !step) return fieldsProblem([{ loc: ['body', 'command'], msg: 'Choose a command.', type: 'value_error' }]);
+    const stale = checkRevision(req, b);
+    if (stale) return stale;
+    const caps = req.tenantId ? req.user.grants[req.tenantId]?.capabilities ?? [] : [];
+    if (!step.caps.some((c) => caps.includes(c))) return problem(403, 'FORBIDDEN', 'Your role does not allow this.');
+    const d = b.detail;
+    const allowed = step.from.includes(d.lifecycle_state) && !(command === 'rollback' && !d.activated_at);
+    if (!allowed) return problem(409, 'POLICY_BUNDLE_STATE', `A ${d.lifecycle_state.toLowerCase()} rulebook cannot do this.`, false, { state: d.lifecycle_state, allowed: step.from });
+    if (step.reason && !reason?.trim()) return fieldsProblem([{ loc: ['body', 'reason'], msg: 'Give a reason.', type: 'value_error' }]);
+    if ((command === 'approve' || command === 'activate') && b.issues.length) {
+      return problem(409, 'POLICY_BUNDLE_HAS_ISSUES', 'Fix the problems first.', false, { issues: b.issues });
+    }
+    const now = new Date().toISOString();
+    const who = req.user.user_id;
+    const log = (bundle: MockPolicyBundle, action: PolicyAuditAction, from: BundleState | null, to: BundleState, why: string | null) =>
+      bundle.audit.unshift({ id: crypto.randomUUID(), action, from_state: from, to_state: to, actor: who, reason: why, details: {}, request_id: null, created_at: now });
+    const move = (bundle: MockPolicyBundle, to: BundleState, action: PolicyAuditAction, why: string | null) => {
+      log(bundle, action, bundle.detail.lifecycle_state, to, why);
+      Object.assign(bundle.detail, { lifecycle_state: to, revision: bundle.detail.revision + 1, updated_at: now });
+    };
+    const from = d.lifecycle_state;
+    if (command === 'approve' || command === 'build') {
+      // Simulation: the index build finishes at once (APPROVED → BUILDING → READY on the server).
+      if (command === 'approve') { log(b, 'APPROVE', from, 'APPROVED', null); Object.assign(d, { approved_by: who, approved_at: now }); }
+      log(b, 'BUILD_STARTED', 'APPROVED', 'BUILDING', null);
+      move(b, 'READY', 'BUILD_READY', null);
+    } else if (command === 'activate' || command === 'rollback') {
+      const current = policyBundlesOf(req).find((x) => x.detail.lifecycle_state === 'ACTIVE' && x !== b);
+      if (current) move(current, 'RETIRED', 'RETIRE', `Replaced by version ${d.version}.`);
+      move(b, 'ACTIVE', command === 'activate' ? 'ACTIVATE' : 'ROLLBACK', reason ?? null);
+      Object.assign(d, { activated_by: who, activated_at: now });
+    } else {
+      move(b, step.to, POLICY_AUDIT[command], reason ?? null);
+    }
+    saveWorkspaces();
+    return json(200, d, { ETag: `"${d.revision}"` });
+  }),
+
+  'POST /policy-bundles/:id/review-decisions': (req) => withPolicyBundle(req, (b) => {
+    const { item_kind: kind, item_id: id, decision, note } = (req.body ?? {}) as { item_kind?: string; item_id?: string; decision?: 'APPROVED' | 'REJECTED'; note?: string | null };
+    const stale = checkRevision(req, b);
+    if (stale) return stale;
+    if (!['DRAFT', 'REVIEW'].includes(b.detail.lifecycle_state)) {
+      return problem(409, 'POLICY_BUNDLE_STATE', 'Items can be reviewed only in a draft or a rulebook in review.', false, { state: b.detail.lifecycle_state, allowed: ['DRAFT', 'REVIEW'] });
+    }
+    const nodes = [...b.rules.map((r) => r.node), ...b.nodes];
+    const item = kind === 'node' ? nodes.find((n) => n.id === id)
+      : kind === 'edge' ? b.edges.find((e) => e.id === id)
+        : kind === 'wording' ? b.rules.flatMap((r) => r.wordings).find((w) => w.id === id) : undefined;
+    if (!item || !decision) return problem(404, 'NOT_FOUND', 'This item does not exist in the rulebook.');
+    const node = kind === 'node' ? nodes.find((n) => n.id === id) : undefined;
+    const wording = kind === 'wording' ? b.rules.flatMap((r) => r.wordings).find((w) => w.id === id) : undefined;
+    const needed: Capability = (node && (node.node_type === 'EXCEPTION' || node.node_type === 'DISCLOSURE')) || wording?.kind === 'STUDY_APPROVED_WORDING' ? 'policy:approve' : 'policy:manage';
+    const denied = needCap(req, needed);
+    if (denied) return denied;
+    const now = new Date().toISOString();
+    Object.assign(item, { review_state: decision, reviewed_by: req.user.user_id, reviewed_at: now, review_note: note ?? null });
+    recheckPolicyBundle(b);
+    b.audit.unshift({ id: crypto.randomUUID(), action: 'REVIEW', from_state: b.detail.lifecycle_state, to_state: b.detail.lifecycle_state, actor: req.user.user_id, reason: note ?? null, details: { item_kind: kind, decision }, request_id: null, created_at: now });
+    Object.assign(b.detail, { revision: b.detail.revision + 1, updated_at: now });
+    saveWorkspaces();
+    return json(200, b.detail, { ETag: `"${b.detail.revision}"` });
+  }),
+
+  'POST /policy-bundles': (req) => {
+    const denied = needCap(req, 'policy:manage');
+    if (denied) return denied;
+    const body = (req.body ?? {}) as { name?: string; source_ref?: string; is_synthetic?: boolean; based_on_bundle_id?: string | null };
+    if (!body.name?.trim() || !body.source_ref?.trim()) return fieldsProblem([{ loc: ['body', 'name'], msg: 'Give the rulebook a name.', type: 'value_error' }]);
+    const all = policyBundlesOf(req);
+    const base = body.based_on_bundle_id ? all.find((x) => x.detail.id === body.based_on_bundle_id) : undefined;
+    if (body.based_on_bundle_id && !base) return problem(404, 'NOT_FOUND', 'The version to copy does not exist.');
+    const now = new Date().toISOString();
+    const version = Math.max(0, ...all.map((x) => x.detail.version)) + 1;
+    // The new draft starts as a copy of the base version's rules, links and review states.
+    const parts = base ? structuredClone({ rules: base.rules, nodes: base.nodes, edges: base.edges }) : { rules: [], nodes: [], edges: [] };
+    const copy: MockPolicyBundle = {
+      ...parts, issues: [], audit: [],
+      detail: {
+        id: crypto.randomUUID(), version, name: body.name, source_ref: body.source_ref, is_synthetic: !!body.is_synthetic, lifecycle_state: 'DRAFT', revision: 1,
+        based_on_bundle_id: base?.detail.id ?? null, approved_by: null, approved_at: null, activated_by: null, activated_at: null, last_error_code: null,
+        created_at: now, updated_at: now, rule_count: parts.rules.length,
+      },
+    };
+    copy.audit = [{ id: crypto.randomUUID(), action: 'CREATE', from_state: null, to_state: 'DRAFT', actor: req.user.user_id, reason: null, details: {}, request_id: null, created_at: now }];
+    recheckPolicyBundle(copy);
+    all.push(copy);
+    saveWorkspaces();
+    return json(201, copy.detail, { ETag: '"1"' });
+  },
+
+  'POST /policy-bundles/:id/rules': (req) => withPolicyDraft(req, (b, now) => {
+    const body = (req.body ?? {}) as Partial<MockPolicyBundle['rules'][number]> & { text?: string; input_kinds?: MockPolicyBundle['nodes'][number]['input_kinds'] };
+    const errs = policyRuleErrors(body, true);
+    if (b.rules.some((r) => r.rule_id === body.rule_id)) errs.push({ loc: ['body', 'rule_id'], msg: 'This rule ID is already in the rulebook.', type: 'value_error' });
+    if (errs.length) return fieldsProblem(errs);
+    const id = crypto.randomUUID();
+    const rule: MockPolicyBundle['rules'][number] = {
+      id, rule_id: body.rule_id!, rule_version: 1, title: body.title!, requirement: body.requirement!, gate: body.gate!, severity: body.severity!,
+      mandatory: !!body.mandatory, check_type: body.check_type!, wordings: [],
+      node: {
+        review_state: 'PROPOSED', origin: 'HUMAN', reviewed_by: null, reviewed_at: null, review_note: null, id: crypto.randomUUID(), node_key: body.rule_id!,
+        node_type: 'RULE', text: body.text!, language: 'en', source_clause_id: null, input_kinds: body.input_kinds ?? [],
+        channels: [], post_formats: [], languages: [], audiences: [], jurisdictions: [], study_ids: [], effective_from: null, effective_to: null, required_study_fact: null,
+      },
+    };
+    b.rules.push(rule);
+    b.detail.rule_count = b.rules.length;
+    editedPolicyBundle(req, b, now);
+    return json(201, rule);
+  }),
+
+  'PATCH /policy-bundles/:id/rules/:ruleId': (req) => withPolicyDraft(req, (b, now) => {
+    const rule = b.rules.find((r) => r.id === req.params.ruleId);
+    if (!rule) return problem(404, 'NOT_FOUND', 'This rule is not in the rulebook.');
+    const body = (req.body ?? {}) as Partial<MockPolicyBundle['rules'][number]>;
+    const errs = policyRuleErrors({ ...rule, ...body }, false);
+    if (errs.length) return fieldsProblem(errs);
+    for (const k of ['title', 'requirement', 'gate', 'severity', 'mandatory', 'check_type'] as const) if (body[k] !== undefined && body[k] !== null) Object.assign(rule, { [k]: body[k] });
+    // An edited rule goes back to review.
+    Object.assign(rule.node, { review_state: 'PROPOSED', reviewed_by: null, reviewed_at: null, review_note: null });
+    editedPolicyBundle(req, b, now);
+    return json(200, rule);
+  }),
+
+  'POST /policy-bundles/:id/rules/:ruleId/wordings': (req) => withPolicyDraft(req, (b, now) => {
+    const rule = b.rules.find((r) => r.id === req.params.ruleId);
+    if (!rule) return problem(404, 'NOT_FOUND', 'This rule is not in the rulebook.');
+    const body = (req.body ?? {}) as { kind?: MockPolicyBundle['rules'][number]['wordings'][number]['kind']; text?: string };
+    if (!body.kind) return fieldsProblem([{ loc: ['body', 'kind'], msg: 'Choose a kind.', type: 'value_error' }]);
+    if (!body.text?.trim()) return fieldsProblem([{ loc: ['body', 'text'], msg: 'Type the wording.', type: 'value_error' }]);
+    const wording = {
+      review_state: 'PROPOSED' as const, origin: 'HUMAN' as const, reviewed_by: null, reviewed_at: null, review_note: null, id: crypto.randomUUID(),
+      policy_rule_id: rule.id, language: 'en' as const, kind: body.kind, text: body.text, source_clause_id: null, translation_of_id: null, created_at: now,
+    };
+    rule.wordings.push(wording);
+    editedPolicyBundle(req, b, now);
+    return json(201, wording);
+  }),
+
+  /* ---------- Policy source files (NRC-20 on NRC-4) ---------- */
+
+  'POST /policy-sources/uploads': (req) => {
+    const denied = needCap(req, 'policy:manage');
+    if (denied) return denied;
+    const body = (req.body ?? {}) as { name?: string; mime_type?: string; size_bytes?: number; checksum_sha256?: string };
+    const uploads = (ws(req).policy_uploads ??= []);
+    const earlier = req.idempotencyKey ? uploads.find((u) => u.upload_id === `sim-pu-${req.idempotencyKey}`) : undefined;
+    if (earlier) return json(201, earlier);
+    if (!body.name?.trim()) return fieldsProblem([{ loc: ['body', 'name'], msg: 'Give the file a name.', type: 'value_error' }]);
+    if (!['application/pdf', 'text/plain', 'text/markdown'].includes(body.mime_type ?? '')) {
+      return fieldsProblem([{ loc: ['body', 'mime_type'], msg: 'Choose a PDF, a plain text file or a Markdown file.', type: 'value_error' }]);
+    }
+    if (!body.size_bytes || body.size_bytes > 52_428_800) return fieldsProblem([{ loc: ['body', 'size_bytes'], msg: 'The file is larger than 50 MB.', type: 'value_error' }]);
+    const id = `sim-pu-${req.idempotencyKey ?? crypto.randomUUID()}`;
+    const upload = {
+      upload_id: id, purpose: 'policy_source' as const, status: 'PENDING_UPLOAD' as const, reason: null, name: body.name, mime_type: body.mime_type!,
+      size_bytes: body.size_bytes, checksum_sha256: body.checksum_sha256 ?? '', scan: null, created_by: req.user.user_id, created_at: new Date().toISOString(),
+      completed_at: null, upload: simStorageTarget(id),
+    };
+    uploads.push(upload);
+    saveWorkspaces();
+    return json(201, upload);
+  },
+
+  'POST /policy-sources/uploads/:uploadId/upload-url': (req) => withPolicyUpload(req, (u) => {
+    u.upload = simStorageTarget(u.upload_id);
+    return json(200, u);
+  }),
+
+  'POST /policy-sources/uploads/:uploadId/complete': (req) => withPolicyUpload(req, (u) => {
+    if (!simStored.has(u.upload_id)) return problem(409, 'UPLOAD_NOT_RECEIVED', 'The file has not arrived yet. Send it, then try again.');
+    Object.assign(u, { status: 'SCANNING', upload: null });
+    saveWorkspaces();
+    return json(202, u);
+  }),
+
+  // Simulation: a scan finishes by the next look.
+  'GET /policy-sources/uploads/:uploadId': (req) => withPolicyUpload(req, (u) => {
+    if (u.status === 'SCANNING') {
+      Object.assign(u, { status: 'READY', completed_at: new Date().toISOString(), scan: { engine: 'simulator', simulated: true, scanned_at: new Date().toISOString() } });
+      saveWorkspaces();
+    }
+    return json(200, u);
+  }),
+
+  'POST /policy-sources': (req) => {
+    const denied = needCap(req, 'policy:manage');
+    if (denied) return denied;
+    const body = (req.body ?? {}) as { upload_id?: string; title?: string; source_ref?: string; is_synthetic?: boolean; language?: 'en' | 'es' };
+    const upload = (ws(req).policy_uploads ?? []).find((u) => u.upload_id === body.upload_id);
+    if (!upload) return problem(404, 'NOT_FOUND', 'This upload does not exist.');
+    if (upload.status !== 'READY') return problem(409, 'POLICY_SOURCE_UPLOAD_NOT_READY', 'The file is still being checked.');
+    if (!body.title?.trim() || !body.source_ref?.trim()) return fieldsProblem([{ loc: ['body', 'title'], msg: 'Give the source a title.', type: 'value_error' }]);
+    const sources = (ws(req).policy_sources ??= []);
+    const same = sources.find((s) => s.source.checksum_sha256 === upload.checksum_sha256 || s.source.upload_id === upload.upload_id);
+    if (same) return json(200, same.source);
+    const source = {
+      id: crypto.randomUUID(), title: body.title, source_ref: body.source_ref, checksum_sha256: upload.checksum_sha256, language: body.language ?? 'en',
+      is_synthetic: !!body.is_synthetic, upload_id: upload.upload_id, extraction_state: 'EXTRACTING' as const, extraction_error_code: null,
+      page_count: null, extracted_at: null, created_by: req.user.user_id, created_at: new Date().toISOString(),
+    };
+    sources.unshift({ source, clauses: [] });
+    saveWorkspaces();
+    return json(201, source);
+  },
+
+  'GET /policy-sources': (req) => {
+    const denied = needPolicyReader(req);
+    if (denied) return denied;
+    if (Number(req.query.get('limit')) > 50) return tooBig();
+    return json(200, { items: (ws(req).policy_sources ?? []).map((s) => s.source), next_cursor: null });
+  },
+
+  // Simulation: clause reading finishes by the next look, with placeholder clauses.
+  'GET /policy-sources/:sourceId': (req) => withPolicySource(req, (s) => {
+    if (s.source.extraction_state === 'EXTRACTING') {
+      s.clauses = [1, 2].map((n) => ({
+        id: crypto.randomUUID(), clause_ref: `${n}.1`, section: `Section ${n}`, page: n, text: `[SYNTHETIC] Placeholder clause ${n}.1 read from ${s.source.title}.`,
+        checksum_sha256: String(n).repeat(64), language: s.source.language,
+      }));
+      Object.assign(s.source, { extraction_state: 'EXTRACTED', page_count: 2, extracted_at: new Date().toISOString() });
+      saveWorkspaces();
+    }
+    return json(200, s.source);
+  }),
+
+  'GET /policy-sources/:sourceId/clauses': (req) => withPolicySource(req, (s) => json(200, { items: s.clauses })),
 
   'GET /rules': (req) => {
     const denied = needCap(req, 'creative:read');
@@ -1197,6 +1465,118 @@ const versionOf = (c: MockCreative) => ({
 /** The display name of a user in the simulation, or null when there is none (as the API answers). */
 const displayName = (req: MockRequest, userId: string): string | null => req.data.USERS.find((u) => u.user_id === userId)?.display_name ?? null;
 
+/** Rulebooks and policy sources: any one of the three policy capabilities (the API's PolicyReader). */
+function needPolicyReader(req: MockRequest) {
+  const caps = (req.tenantId ? req.user.grants[req.tenantId]?.capabilities : undefined) ?? [];
+  return (['policy:manage', 'policy:approve', 'policy:activate'] as Capability[]).some((c) => caps.includes(c))
+    ? null
+    : problem(403, 'FORBIDDEN', 'Your role does not allow this.');
+}
+
+/** Like the API: policy lists return at most 50 per page. */
+const tooBig = () => fieldsProblem([{ loc: ['query', 'limit'], msg: 'Input should be less than or equal to 50', type: 'less_than_equal' }]);
+
+const policyBundlesOf = (req: MockRequest): MockPolicyBundle[] => (ws(req).policy_bundles ??= []);
+
+type BundleState = MockPolicyBundle['detail']['lifecycle_state'];
+type BundleCommand = 'submit' | 'return_to_draft' | 'approve' | 'reject' | 'build' | 'activate' | 'rollback' | 'retire';
+type PolicyAuditAction = MockPolicyBundle['audit'][number]['action'];
+/** The backend's TRANSITIONS table (nrc-marketing-api, app/services/policy_bundles.py). */
+const POLICY_STEPS: Record<BundleCommand, { from: BundleState[]; to: BundleState; caps: Capability[]; reason: boolean }> = {
+  submit: { from: ['DRAFT'], to: 'REVIEW', caps: ['policy:manage'], reason: false },
+  return_to_draft: { from: ['REVIEW'], to: 'DRAFT', caps: ['policy:manage', 'policy:approve'], reason: false },
+  approve: { from: ['REVIEW'], to: 'APPROVED', caps: ['policy:approve'], reason: false },
+  reject: { from: ['REVIEW'], to: 'REJECTED', caps: ['policy:approve'], reason: true },
+  build: { from: ['APPROVED'], to: 'APPROVED', caps: ['policy:activate'], reason: false },
+  activate: { from: ['READY'], to: 'ACTIVE', caps: ['policy:activate'], reason: true },
+  rollback: { from: ['RETIRED'], to: 'ACTIVE', caps: ['policy:activate'], reason: true },
+  retire: { from: ['ACTIVE'], to: 'RETIRED', caps: ['policy:activate'], reason: true },
+};
+const POLICY_AUDIT: Record<BundleCommand, PolicyAuditAction> = {
+  submit: 'SUBMIT', return_to_draft: 'RETURN_TO_DRAFT', approve: 'APPROVE', reject: 'REJECT', build: 'BUILD_STARTED', activate: 'ACTIVATE', rollback: 'ROLLBACK', retire: 'RETIRE',
+};
+
+/**
+ * Simulation storage for policy files: the "signed address" is a fake path the
+ * fake fetch catches (see mockFetch), so no file leaves the browser. Only the
+ * fact that it arrived is kept.
+ */
+const SIM_STORAGE = '/__sim/storage/';
+const simStored = new Set<string>();
+const simStorageTarget = (uploadId: string) => ({
+  url: `${API_PREFIX}${SIM_STORAGE}${uploadId}`, method: 'PUT' as const, headers: { 'Content-Type': 'application/octet-stream' },
+  expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+});
+
+function withPolicyUpload(req: MockRequest, fn: (u: NonNullable<MockWorkspace['policy_uploads']>[number]) => Response): Response {
+  const denied = needCap(req, 'policy:manage');
+  if (denied) return denied;
+  const u = (ws(req).policy_uploads ?? []).find((x) => x.upload_id === req.params.uploadId);
+  return u ? fn(u) : problem(404, 'NOT_FOUND', 'This upload does not exist.');
+}
+
+function withPolicySource(req: MockRequest, fn: (s: MockPolicySource) => Response): Response {
+  const denied = needPolicyReader(req);
+  if (denied) return denied;
+  const s = (ws(req).policy_sources ?? []).find((x) => x.source.id === req.params.sourceId);
+  return s ? fn(s) : problem(404, 'NOT_FOUND', 'This policy source does not exist.');
+}
+
+/** The simulation's only server check: items not reviewed yet block approval and activation. */
+function recheckPolicyBundle(b: MockPolicyBundle): void {
+  const open = [
+    ...b.rules.filter((r) => r.node.review_state === 'PROPOSED').map((r) => `rule:${r.rule_id}`),
+    ...b.rules.flatMap((r) => r.wordings.filter((w) => w.review_state === 'PROPOSED').map(() => `wording:${r.rule_id}`)),
+  ];
+  b.issues = [...new Set(open)].map((subject) => ({ code: 'UNREVIEWED_ITEM' as const, subject, message: `[SYNTHETIC] ${subject} has not been reviewed.` }));
+}
+
+/** Edits run only on a DRAFT, with policy:manage and the revision the screen showed. */
+function withPolicyDraft(req: MockRequest, fn: (b: MockPolicyBundle, now: string) => Response): Response {
+  return withPolicyBundle(req, (b) => {
+    const denied = needCap(req, 'policy:manage');
+    if (denied) return denied;
+    const stale = checkRevision(req, b);
+    if (stale) return stale;
+    if (b.detail.lifecycle_state !== 'DRAFT') {
+      return problem(409, 'POLICY_BUNDLE_STATE', 'Only a draft can be edited.', false, { state: b.detail.lifecycle_state, allowed: ['DRAFT'] });
+    }
+    return fn(b, new Date().toISOString());
+  });
+}
+
+function editedPolicyBundle(req: MockRequest, b: MockPolicyBundle, now: string): void {
+  recheckPolicyBundle(b);
+  b.audit.unshift({ id: crypto.randomUUID(), action: 'EDIT', from_state: 'DRAFT', to_state: 'DRAFT', actor: req.user.user_id, reason: null, details: {}, request_id: null, created_at: now });
+  Object.assign(b.detail, { revision: b.detail.revision + 1, updated_at: now });
+  saveWorkspaces();
+}
+
+function policyRuleErrors(b: { rule_id?: string; title?: string; requirement?: string; text?: string; gate?: string; severity?: string; check_type?: string }, isNew: boolean): FieldError[] {
+  const errs: FieldError[] = [];
+  const need = (k: keyof typeof b, msg: string) => { if (!String(b[k] ?? '').trim()) errs.push({ loc: ['body', k], msg, type: 'value_error' }); };
+  if (isNew && !/^[A-Z][A-Z0-9-]{1,39}$/.test(b.rule_id ?? '')) errs.push({ loc: ['body', 'rule_id'], msg: 'Use capital letters, digits and dashes, starting with a letter.', type: 'value_error' });
+  need('title', 'Give the rule a title.');
+  need('requirement', 'Say what the post must do.');
+  if (isNew) need('text', 'Paste the rule as it reads in the policy.');
+  return errs;
+}
+
+/** Edits and commands name the revision they saw (If-Match): 428 without it, 412 when it moved on. */
+function checkRevision(req: MockRequest, b: MockPolicyBundle): Response | null {
+  if (!req.ifMatch) return problem(428, 'PRECONDITION_REQUIRED', 'Send the revision you edited (If-Match).');
+  if (req.ifMatch !== `"${b.detail.revision}"`) return problem(412, 'VERSION_CONFLICT', 'Someone changed this rulebook. Reload it.', false, { current_revision: b.detail.revision });
+  return null;
+}
+
+/** Runs `fn` on the rulebook named in the path, after the reader check; 404 when there is none. */
+function withPolicyBundle(req: MockRequest, fn: (b: MockPolicyBundle) => Response): Response {
+  const denied = needPolicyReader(req);
+  if (denied) return denied;
+  const b = policyBundlesOf(req).find((x) => x.detail.id === req.params.id);
+  return b ? fn(b) : problem(404, 'NOT_FOUND', 'This policy bundle does not exist.');
+}
+
 function needCap({ user, tenantId }: MockRequest, cap: Capability) {
   const grant = tenantId ? user.grants[tenantId] : undefined;
   return grant?.capabilities.includes(cap) ? null : problem(403, 'FORBIDDEN', 'Your role does not allow this here.');
@@ -1470,6 +1850,12 @@ export const mockFetch: typeof fetch = async (input, init) => {
   const path = url.pathname.slice(url.pathname.indexOf(API_PREFIX) + API_PREFIX.length) || '/';
   const method = (init?.method ?? 'GET').toUpperCase();
   const headers = new Headers(init?.headers);
+
+  // A file sent to simulation storage: like a signed address, it needs no token. Nothing is kept but the arrival.
+  if (method === 'PUT' && path.startsWith(SIM_STORAGE)) {
+    simStored.add(decodeURIComponent(path.slice(SIM_STORAGE.length)));
+    return new Response(null, { status: 200 });
+  }
 
   const token = headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
   const data = await loadMockData();

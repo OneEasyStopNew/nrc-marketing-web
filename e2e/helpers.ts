@@ -29,7 +29,7 @@ const LABELS: Record<string, string> = {
   creator: 'Marketing creator', reviewer: 'Policy reviewer', admin: 'Marketing administrator',
   'no-access': 'No Marketing access', disabled: 'Disabled account', mfa: 'Two-step sign-in missing',
   'creator-no-studies': 'Creator, no studies set up', 'creator-closed': 'Creator, only closed studies',
-  publisher: 'Publisher', 'policy-admin': 'Policy administrator',
+  publisher: 'Publisher', 'policy-admin': 'Policy administrator', 'policy-approver': 'Policy owner (approver)',
 };
 const identityLabel = (id: string) => LABELS[id] ?? id;
 

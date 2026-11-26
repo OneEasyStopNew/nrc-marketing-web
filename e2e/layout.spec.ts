@@ -141,6 +141,20 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
   } },
   { name: 'team', open: (page) => signInAt(page, '/marketing/team', 'admin') },
   { name: 'usage', open: (page) => signInAt(page, '/marketing/usage', 'admin') },
+  { name: 'rulebooks', open: (page) => signInAt(page, '/marketing/rules/rulebooks', 'policy-admin') },
+  { name: 'rulebook-draft', open: (page) => signInAt(page, '/marketing/rules/rulebooks/00000000-0000-4000-8000-00000000c004', 'policy-admin') },
+  { name: 'rulebook-add-rule', open: async (page) => {
+    await signInAt(page, '/marketing/rules/rulebooks/00000000-0000-4000-8000-00000000c004', 'policy-admin');
+    await page.getByRole('button', { name: 'Add a rule' }).click();
+    await page.getByRole('dialog').waitFor();
+  } },
+  { name: 'rulebook-retire-confirm', open: async (page) => {
+    await signInAt(page, '/marketing/rules/rulebooks/00000000-0000-4000-8000-00000000c002', 'policy-admin');
+    await page.getByLabel('Status actions', { exact: true }).getByRole('button', { name: 'Retire' }).click();
+    await page.getByRole('dialog').waitFor();
+  } },
+  { name: 'policy-files', open: (page) => signInAt(page, '/marketing/rules/sources', 'policy-admin') },
+  { name: 'policy-file', open: (page) => signInAt(page, '/marketing/rules/sources/00000000-0000-4000-8000-00000000d001', 'policy-admin') },
   { name: 'dashboards-usage', open: (page) => signInAt(page, '/marketing/insights', 'admin') },
   { name: 'dashboards-validation', open: async (page) => {
     await signInAt(page, '/marketing/insights', 'admin');

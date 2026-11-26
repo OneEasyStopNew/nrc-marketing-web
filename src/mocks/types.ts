@@ -204,4 +204,31 @@ export interface MockWorkspace {
   publications: Publication[];
   members: Member[];
   activity: ActivityItem[];
+  /**
+   * Rulebook versions for policy administration (NRC-20 on the NRC-4 contract,
+   * api/policyAdmin.ts). Optional so data.ts files without it still compile.
+   */
+  policy_bundles?: MockPolicyBundle[];
+  /** Policy source files and the clauses read from them (NRC-20 on NRC-4). Optional. */
+  policy_sources?: MockPolicySource[];
+  /** Policy file uploads in progress or done. Filled by the fake API; not seeded. */
+  policy_uploads?: Schemas['PolicyUploadRead'][];
+}
+
+export interface MockPolicySource {
+  source: Schemas['PolicySourceRead'];
+  clauses: Schemas['PolicyClauseRead'][];
+}
+
+/** One rulebook version with everything its detail screens read. */
+export interface MockPolicyBundle {
+  detail: Schemas['PolicyBundleDetail'];
+  rules: Schemas['PolicyRuleRead'][];
+  /** Nodes that are not a rule's own node (exceptions, disclosures, clauses…). */
+  nodes: Schemas['PolicyNodeRead'][];
+  edges: Schemas['PolicyEdgeRead'][];
+  /** What GET /checks answers: problems that block approval or activation. */
+  issues: Schemas['PolicyIssueRead'][];
+  /** Newest first. */
+  audit: Schemas['PolicyAuditRead'][];
 }

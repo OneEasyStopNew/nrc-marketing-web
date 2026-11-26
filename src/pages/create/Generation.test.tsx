@@ -10,6 +10,15 @@ import { GenerationStep } from './Generation';
 
 /** One render per job state the step shows, plus its status region (JS-82). */
 
+// The step reads the session only to decide whether model choice (NRC-21) is shown.
+// These tests cover the job states, so model choice stays hidden, as in a real build
+// while it is in development, and no session or query client is needed.
+vi.mock('@/pages/shared/ui', async (orig) => ({ ...(await orig<typeof import('@/pages/shared/ui')>()), useInDevelopment: () => true }));
+vi.mock('./ModelChoice', async (orig) => ({
+  ...(await orig<typeof import('./ModelChoice')>()),
+  useGenerationModels: () => ({ data: undefined, isPending: false, isError: false }),
+}));
+
 afterEach(cleanup);
 
 // Test fixtures: the step reads only these fields; the rest of each type is irrelevant here.
