@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { IN_DEVELOPMENT_IN_SIM as IN_DEVELOPMENT } from './helpers';
 import { lightTheme, openNav, seen, signInAt } from './helpers';
 
 /**
@@ -55,8 +54,8 @@ test('search narrows the rules and clearing the filters restores them', async ({
 });
 
 // Regression (PR #4, RE-11): filters live in the URL, so a filtered view can be shared and survives
-// going to Manage rules and back. (Sign-in drops the query string by design, see src/auth/returnTo.ts.)
-test('filters are kept in the URL and survive going to Manage rules and back', async ({ page }) => {
+// going to Rulebooks and back. (Sign-in drops the query string by design, see src/auth/returnTo.ts.)
+test('filters are kept in the URL and survive going to Rulebooks and back', async ({ page }) => {
   await signInAt(page, '/marketing/rules', 'policy-admin');
   const pick = async (box: string, option: string) => {
     // Under parallel load the mobile selector can miss its first tap; retry until the list opens.
@@ -84,8 +83,8 @@ test('filters are kept in the URL and survive going to Manage rules and back', a
   };
   await check();
 
-  await page.getByRole('main').getByRole('link', { name: 'Manage rules' }).click();
-  await expect(page).toHaveURL(/\/marketing\/rules\/manage$/);
+  await page.getByRole('main').getByRole('link', { name: 'Rulebooks' }).click();
+  await expect(page).toHaveURL(/\/marketing\/rules\/rulebooks$/);
   await page.goBack();
   await expect(page).toHaveURL(/severity=critical/);
   await expect(page.getByRole('searchbox', { name: 'Search rules' })).toHaveValue('SIM');
@@ -111,23 +110,6 @@ test('the viewer is read-only: no edit, upload or activate controls', async ({ p
   }
 });
 
-test('only a policy administrator gets the Manage rules link, and editing there is in development', async ({ page }) => {
-  await signInAt(page, '/marketing/rules', 'creator');
-  await expect(ruleCard(page, 'SIM-FACTS-1')).toBeVisible();
-  await expect(page.getByRole('main').getByRole('link', { name: 'Manage rules' })).toHaveCount(0);
-
-  await signInAt(page, '/marketing/rules', 'policy-admin');
-  await page.getByRole('main').getByRole('link', { name: 'Manage rules' }).click();
-  await expect(page).toHaveURL(/\/marketing\/rules\/manage$/);
-  await page.getByRole('button', { name: /new rule/i }).click();
-  if (IN_DEVELOPMENT.ruleEditing) {
-    await expect(page.getByRole('heading', { name: 'In development: New rule' })).toBeVisible();
-    await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0);
-  } else {
-    await expect(page.getByRole('dialog', { name: 'New rule' })).toBeVisible();
-  }
-});
-
 test('no active policy shows "Policy setup required", never a clean result', async ({ page }) => {
   await signInAt(page, '/marketing/rules', 'creator-no-studies');
   await expect(h1(page)).toHaveText('Rules');
@@ -146,4 +128,21 @@ test('the page keeps one always-mounted status region, empty once the rules are 
     page.getByRole('status').filter({ hasText: /Loading the active policy|No approved policy|could not be loaded/ }),
   ).toHaveCount(0);
   await expect(page.locator('[role="status"][aria-live="polite"]').filter({ hasText: /^$/ })).not.toHaveCount(0);
+});
+
+test('the Rules page links policy roles to Rulebooks; the old Manage rules screen is gone', async ({ page }) => {
+  await signInAt(page, '/marketing/rules', 'creator');
+  await expect(ruleCard(page, 'SIM-FACTS-1')).toBeVisible();
+  await expect(page.getByRole('main').getByRole('link', { name: 'Rulebooks' })).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('link', { name: 'Manage rules' })).toHaveCount(0);
+
+  await signInAt(page, '/marketing/rules', 'policy-admin');
+  await expect(page.getByRole('main').getByRole('link', { name: 'Rulebooks' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('link', { name: 'Manage rules' })).toHaveCount(0);
+});
+
+test('an old Manage rules address opens Rulebooks', async ({ page }) => {
+  await signInAt(page, '/marketing/rules/manage', 'policy-admin');
+  await expect(page).toHaveURL(/\/marketing\/rules\/rulebooks$/);
+  await expect(h1(page)).toHaveText('Rulebooks');
 });

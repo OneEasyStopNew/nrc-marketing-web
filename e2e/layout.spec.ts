@@ -171,13 +171,6 @@ const SCREENS: { name: string; open: (page: Page) => Promise<void> }[] = [
     await page.locator('li button', { hasText: 'Partner company (simulation)' }).click();
     await page.getByText('This balance is not current').first().waitFor();
   } },
-  // Rule editing is in development for the demo (NRC-20, IN_DEVELOPMENT.ruleEditing): "New rule" opens the in-development dialog.
-  ...(IN_DEVELOPMENT.ruleEditing ? [{ name: 'rule-new-in-development', open: async (page: Page) => {
-    await signInAt(page, '/marketing/rules/manage', 'policy-admin');
-    await page.getByRole('button', { name: 'New rule' }).click();
-    await page.getByRole('heading', { name: 'In development: New rule' }).waitFor();
-    await page.waitForTimeout(400);
-  } }] : []),
   { name: 'rules-active-policy', open: (page) => signInAt(page, '/marketing/rules', 'creator') },
   { name: 'rules-setup-required', open: (page) => signInAt(page, '/marketing/rules', 'creator-no-studies') },
   { name: 'no-permission', open: (page) => signInAt(page, '/marketing/approvals', 'creator') },

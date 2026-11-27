@@ -5,7 +5,7 @@ import type { Creative } from '@/api/creatives';
 import type { ClientCheck, ClientMedia, ClientPost } from '@/api/clientPosts';
 import type { Attempt, Balance, PriceList } from '@/api/usage';
 import type { GenerationModel } from '@/api/generationModels';
-import type { ActivityItem, ApprovalRequest, MediaAsset, Member, PolicyRule, Publication, SocialAccount, SocialChannel, SocialSet } from '@/api/workspace';
+import type { ActivityItem, ApprovalRequest, MediaAsset, Member, Publication, SocialAccount, SocialChannel, SocialSet } from '@/api/workspace';
 
 /**
  * Shape of the local dummy data file `src/mocks/data.ts`.
@@ -196,7 +196,8 @@ type OmitKnown<T, K extends PropertyKey> = { [P in keyof T as string extends P ?
 /** One organisation's dummy workspace. Every name is visibly fake. */
 export interface MockWorkspace {
   media: OmitKnown<MediaAsset, 'preview_url'>[];
-  rules: PolicyRule[];
+  /** No longer read (the old /rules screen is gone). Optional so older data.ts files still compile. */
+  rules?: unknown[];
   approvals: OmitKnown<ApprovalRequest, 'is_own'>[];
   /** Brand or region groups of accounts (NRC-31/NRC-39). */
   social_sets: SocialSet[];

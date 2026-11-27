@@ -77,7 +77,7 @@ export const isFiltered = (f: PolicyFilter): boolean => f.severity !== 'any' || 
 /** Unknown inputs from a newer backend show as sent rather than disappearing. */
 export const inputsLabel = (inputs: readonly string[]): string => inputs.map((i) => labelFor(INPUT_LABEL, i)).join(', ');
 
-// Filters live in the URL so a filtered view can be shared and survives going to Manage rules and back.
+// Filters live in the URL so a filtered view can be shared and survives going to Rulebooks and back.
 export const FILTER_PARAM = { search: 'q', severity: 'severity', mandatory: 'mandatory' } as const;
 
 /** Reads the filter from the URL; anything unrecognised falls back to "any". */
@@ -104,5 +104,3 @@ export function paramsWithFilter(params: URLSearchParams, f: PolicyFilter): URLS
   return next;
 }
 
-// Rule administration is for policy administrators only (policy:manage), in the demo and after it.
-export const RULE_ADMIN_PATH = '/marketing/rules/manage';

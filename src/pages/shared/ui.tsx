@@ -6,7 +6,7 @@ import { Heading, Text } from '@astryxdesign/core/Text';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import { EmptyState as AxEmptyState } from '@astryxdesign/core/EmptyState';
 import { isApiError } from '@/api/errors';
-import type { AccountState, DraftSummary, MediaStatus, PublicationState, ReviewState, RuleStatus } from '@/api/workspace';
+import type { AccountState, DraftSummary, MediaStatus, PublicationState, ReviewState } from '@/api/workspace';
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { IconName } from '@/components/ui/Icon';
@@ -49,10 +49,6 @@ export const AccountBadge = badge({
   CONNECTED: ['done', 'Connected'], TEST_ONLY: ['brand', 'Test only'], PENDING_APP_REVIEW: ['waiting', 'App review pending'],
   PERMISSION_MISSING: ['blocked', 'Permission missing'], EXPIRED: ['blocked', 'Expired'], REVOKED: ['blocked', 'Revoked'],
 } satisfies Record<AccountState, [BadgeVariant, string]>);
-
-export const RuleStatusBadge = badge({
-  ACTIVE: ['done', 'Active'], DRAFT: ['waiting', 'Draft'], RETIRED: ['neutral', 'Retired'],
-} satisfies Record<RuleStatus, [BadgeVariant, string]>);
 
 export const SeverityBadge = badge({ critical: ['blocked', 'Critical'], major: ['blocked', 'Major'], minor: ['waiting', 'Minor'] });
 

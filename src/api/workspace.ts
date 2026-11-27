@@ -88,44 +88,6 @@ export interface MediaUpload {
   tags: string[];
 }
 
-/* ---------- Policy rules (NRC-20) ---------- */
-
-export const RuleStatus = z.enum(['ACTIVE', 'DRAFT', 'RETIRED']);
-export type RuleStatus = z.infer<typeof RuleStatus>;
-export const RuleGate = z.enum(['completeness', 'study_facts', 'policy', 'media']);
-export type RuleGate = z.infer<typeof RuleGate>;
-
-const PolicyRuleSchema = z.object({
-  rule_id: z.string(),
-  version: z.number().int(),
-  title: z.string(),
-  description: z.string(),
-  gate: RuleGate,
-  severity: z.enum(['critical', 'major', 'minor']),
-  mandatory: z.boolean(),
-  status: RuleStatus,
-  applies_to: z.array(z.enum(['brief', 'caption', 'image', 'video'])),
-  source: z.object({ document: z.string(), clause: z.string(), excerpt: z.string() }),
-  suggested_correction: z.string().nullable(),
-  updated_by: z.string(),
-  updated_at: isoDateTime,
-  /** Validation runs in the last 30 days where this rule failed. */
-  fail_count_30d: z.number().int(),
-  unable_count_30d: z.number().int(),
-});
-export type PolicyRule = Row<typeof PolicyRuleSchema>;
-
-export interface RuleDraft {
-  title: string;
-  description: string;
-  gate: RuleGate;
-  severity: PolicyRule['severity'];
-  mandatory: boolean;
-  applies_to: PolicyRule['applies_to'];
-  source: PolicyRule['source'];
-  suggested_correction: string | null;
-}
-
 /* ---------- Approvals (NRC-12 / NRC-23 full scope) ---------- */
 
 const ApprovalRequestSchema = z.object({
@@ -288,9 +250,6 @@ export interface WorkspaceApi {
   // The media list is GET /media in api/assets.ts (in the OpenAPI); upload and remove are still proposals.
   uploadMedia(body: MediaUpload): Promise<MediaAsset>;
   archiveMedia(id: string): Promise<void>;
-  rules(signal?: AbortSignal): Promise<PolicyRule[]>;
-  createRule(body: RuleDraft): Promise<PolicyRule>;
-  updateRule(id: string, version: number, body: Partial<RuleDraft> & { status?: RuleStatus }): Promise<PolicyRule>;
   approvals(signal?: AbortSignal): Promise<ApprovalRequest[]>;
   approval(id: string, signal?: AbortSignal): Promise<ApprovalRequest>;
   decide(id: string, version: number, decision: Decision, reason: string): Promise<ApprovalRequest>;
@@ -317,10 +276,6 @@ export const workspaceApi: WorkspaceApi = {
   uploadMedia: async (body) => (await requestWithMeta('POST', '/media', MediaAssetSchema, { body, idempotencyKey: newKey('media') })).data,
   archiveMedia: async (assetId) => { await http.del(`/media/${id(assetId)}`, NoContent); },
 
-  rules: (signal) => http.get('/rules', z.array(PolicyRuleSchema), { signal }),
-  createRule: async (body) => (await requestWithMeta('POST', '/rules', PolicyRuleSchema, { body, idempotencyKey: newKey('rule') })).data,
-  updateRule: async (ruleId, version, body) =>
-    (await requestWithMeta('PATCH', `/rules/${id(ruleId)}`, PolicyRuleSchema, { body, etag: `"${version}"` })).data,
 
   approvals: (signal) => http.get('/approvals', z.array(ApprovalRequestSchema), { signal }),
   approval: (approvalId, signal) => http.get(`/approvals/${id(approvalId)}`, ApprovalRequestSchema, { signal }),

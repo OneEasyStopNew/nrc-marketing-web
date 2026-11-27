@@ -10,7 +10,7 @@ import type { ValidationContext, ValidationRun as ValidationRunRead } from '@/ap
 import { evaluate } from './validator';
 import { loadMockData, MOCK_DATA_PATH } from './load';
 import { mockServer, saveWorkspaces, workspaceFor } from './server';
-import type { MediaUpload, Member, PolicyRule, Publication, PublicationRequest, RuleDraft, SocialChannel } from '@/api/workspace';
+import type { MediaUpload, Member, Publication, PublicationRequest, SocialChannel } from '@/api/workspace';
 
 /**
  * Fake Marketing API for simulation mode, following the backend's published
@@ -763,47 +763,6 @@ const ROUTES: Record<string, Handler> = {
   }),
 
   'GET /policy-sources/:sourceId/clauses': (req) => withPolicySource(req, (s) => json(200, { items: s.clauses })),
-
-  'GET /rules': (req) => {
-    const denied = needCap(req, 'creative:read');
-    return denied ?? json(200, ws(req).rules);
-  },
-
-  'POST /rules': (req) => {
-    const denied = needCap(req, 'policy:manage');
-    if (denied) return denied;
-    const b = req.body as Partial<RuleDraft>;
-    const errs = ruleErrors(b);
-    if (errs.length) return fieldsProblem(errs);
-    const n = ws(req).rules.length + 1;
-    const rule = {
-      rule_id: `SIM-NEW-${n}`, version: 1, title: b.title!.trim(), description: b.description!.trim(), gate: b.gate!, severity: b.severity!,
-      mandatory: !!b.mandatory, status: 'DRAFT' as const, applies_to: b.applies_to!, source: b.source!, suggested_correction: b.suggested_correction ?? null,
-      updated_by: req.user.user_id, updated_at: new Date().toISOString(), fail_count_30d: 0, unable_count_30d: 0,
-    };
-    ws(req).rules.unshift(rule);
-    logActivity(req, 'drafted rule', rule.rule_id, '/marketing/rules');
-    return json(201, rule);
-  },
-
-  'PATCH /rules/:id': (req) => {
-    const denied = needCap(req, 'policy:manage');
-    if (denied) return denied;
-    const rule = ws(req).rules.find((r) => r.rule_id === req.params.id);
-    if (!rule) return problem(404, 'NOT_FOUND', 'This rule does not exist.');
-    if (!req.ifMatch) return problem(428, 'PRECONDITION_REQUIRED', 'Send the version you edited (If-Match).');
-    if (req.ifMatch !== `"${rule.version}"`) return problem(412, 'VERSION_CONFLICT', 'Someone changed this rule. Reload it.', false, { current_version: rule.version });
-    const b = req.body as Partial<RuleDraft> & { status?: PolicyRule['status'] };
-    if (rule.status === 'RETIRED') return problem(409, 'RULE_RETIRED', 'A retired rule cannot be changed. Draft a new rule instead.');
-    if (b.status && b.status !== rule.status && !(rule.status === 'DRAFT' && b.status === 'ACTIVE') && !(rule.status === 'ACTIVE' && b.status === 'RETIRED')) {
-      return problem(409, 'INVALID_TRANSITION', `A ${rule.status.toLowerCase()} rule cannot become ${b.status.toLowerCase()}.`);
-    }
-    const errs = ruleErrors({ ...rule, ...b });
-    if (errs.length) return fieldsProblem(errs);
-    Object.assign(rule, b, { version: rule.version + 1, updated_by: req.user.user_id, updated_at: new Date().toISOString() });
-    logActivity(req, b.status === 'ACTIVE' ? 'activated rule' : b.status === 'RETIRED' ? 'retired rule' : 'edited rule', rule.rule_id, '/marketing/rules');
-    return json(200, rule);
-  },
 
   'GET /approvals': (req) => {
     const denied = needCap(req, 'creative:read');
@@ -1788,17 +1747,6 @@ const ws = (req: MockRequest) => workspaceFor(req.tenantId ?? '', req.data.WORKS
 function logActivity(req: MockRequest, action: string, target: string, href: string | null) {
   ws(req).activity.unshift({ id: crypto.randomUUID(), at: new Date().toISOString(), actor: req.user.display_name, action, target, href });
   saveWorkspaces();
-}
-
-function ruleErrors(b: Partial<RuleDraft>): FieldError[] {
-  const errs: FieldError[] = [];
-  if (!b.title?.trim()) errs.push({ loc: ['body', 'title'], msg: 'Give the rule a short title.', type: 'missing' });
-  if (!b.description?.trim()) errs.push({ loc: ['body', 'description'], msg: 'Say what the rule checks.', type: 'missing' });
-  if (!b.gate) errs.push({ loc: ['body', 'gate'], msg: 'Choose the check area.', type: 'missing' });
-  if (!b.severity) errs.push({ loc: ['body', 'severity'], msg: 'Choose a severity.', type: 'missing' });
-  if (!b.applies_to?.length) errs.push({ loc: ['body', 'applies_to'], msg: 'Choose what the rule applies to.', type: 'missing' });
-  if (!b.source?.clause?.trim()) errs.push({ loc: ['body', 'source', 'clause'], msg: 'Cite the clause this rule comes from.', type: 'missing' });
-  return errs;
 }
 
 /** Status of a draft for the drafts list: its latest validation and review. */

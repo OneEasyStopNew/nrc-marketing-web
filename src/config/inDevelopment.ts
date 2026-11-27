@@ -20,15 +20,6 @@ export const IN_DEVELOPMENT = {
   /** Connected accounts (NRC-24): outside the demo. */
   accounts: true,
   /**
-   * Adding, editing, activating and retiring rules (NRC-20): the demo is read-only.
-   * Owner: Firoz (NRC-20). Set to false when the backend /rules write endpoints
-   * (draft, edit, activate, retire; Dinesh) are merged. Undo then: the e2e test
-   * 'rule editing controls stay visible but only open the in-development dialog'
-   * and layout case 'rule-new-in-development' skip or go; 'a policy administrator
-   * drafts a rule…' (workspace.spec.ts) runs again.
-   */
-  ruleEditing: true,
-  /**
    * Uploading and removing media (NRC-18): "user upload remains later". Owner: Firoz.
    * Set to false when the backend upload (NRC-3) and media archive endpoints are live. Then the
    * Upload and Remove dialogs in MediaPage.tsx run again: update the IN_DEVELOPMENT.mediaUpload

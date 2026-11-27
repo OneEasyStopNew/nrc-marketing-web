@@ -16,9 +16,11 @@ import type { ActivityItem, ApprovalRequest, DraftSummary, Publication, SocialAc
 import { Button } from '@/components/ui/Button';
 import { EmptyState, PageHeader } from '@/components/ui/Misc';
 import { ROLE_LABELS } from '@/components/layout/AppLayout';
-import { RULE_ADMIN_PATH } from '@/pages/rules/activePolicy';
+import type { BundleState } from '@/api/policyAdmin';
+import { RULEBOOKS_PATH, rulebookHref } from '@/pages/rules/admin/paths';
+import { useCanReadRulebooks, useRulebooks } from '@/pages/rules/admin/useRulebooks';
 import {
-  useAccounts, useActivity, useApprovals, useDrafts, useMembers, usePublications, useRules,
+  useAccounts, useActivity, useApprovals, useDrafts, useMembers, usePublications,
 } from './shared/queries';
 import {
   AccountBadge, InDevelopment, PublicationBadge, QueryState, ReviewBadge, SectionTitle, StatCard, ValidationBadge, useInDevelopment,
@@ -35,6 +37,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export default function Home(): ReactElement {
   const dashboardsInDev = useInDevelopment('dashboards');
   const { can } = useAuth();
+  const rulebooks = useCanReadRulebooks();
   const { me, context } = useSession();
   const roles = context.roles;
   const has = (r: (typeof roles)[number]) => roles.includes(r) || roles.includes('admin');
@@ -60,7 +63,7 @@ export default function Home(): ReactElement {
           {roles.includes('admin') && can('membership:manage') && <AdminOverview />}
           {has('creator') && can('creative:write') && <CreatorDashboard />}
           {has('reviewer') && can('approval:decide') && <ReviewerDashboard />}
-          {has('policy_admin') && can('policy:manage') && <PolicyDashboard />}
+          {(has('policy_admin') || has('policy_approver')) && rulebooks && <PolicyDashboard />}
           {has('publisher') && can('publication:manage') && <PublisherDashboard />}
           {can('creative:read') && <RecentActivity />}
         </>
@@ -191,41 +194,46 @@ const approvalColumns: TableColumn<ApprovalRequest>[] = [
   },
 ];
 
-/* ---------- Policy administrator ---------- */
+/* ---------- Policy administrator and policy owner ---------- */
 
+/**
+ * Where the rulebooks stand (NRC-20, /policy-bundles): the version in use, and
+ * the versions waiting for someone. Read from the newest page of versions.
+ */
 function PolicyDashboard() {
-  const rules = useRules();
+  const list = useRulebooks(null);
+  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const count = (s: BundleState) => rows.filter((b) => b.lifecycle_state === s).length;
+  const active = rows.find((b) => b.lifecycle_state === 'ACTIVE');
+  const waiting = rows.filter((b) => b.lifecycle_state === 'REVIEW' || b.lifecycle_state === 'READY');
   return (
-    <VStack gap={6}>
-      <SectionTitle title="Policy rules" description="The rules every brief, caption and image is checked against."
-        actions={<Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button>} />
-      <QueryState query={rules} what="the policy rules">
-        {(all) => {
-          const active = all.filter((r) => r.status === 'ACTIVE');
-          const failing = [...active].sort((a, b) => b.fail_count_30d - a.fail_count_30d).filter((r) => r.fail_count_30d > 0).slice(0, 5);
-          return (
-            <>
-              <Tiles>
-                <StatCard label="Active rules" value={active.length} note={`${active.filter((r) => r.mandatory).length} mandatory`} />
-                <StatCard label="Drafts to publish" value={all.filter((r) => r.status === 'DRAFT').length} note="Not applied until activated" />
-                <StatCard label="Failures, last 30 days" value={active.reduce((n, r) => n + r.fail_count_30d, 0)} />
-                <StatCard label="Could not assess, 30 days" value={active.reduce((n, r) => n + r.unable_count_30d, 0)} note="Missing or unreadable input" />
-              </Tiles>
-              <Panel title="Rules that fail most often">
-                {failing.length ? (
-                  <List hasDividers>
-                    {failing.map((r) => (
-                      <ListItem key={r.rule_id} label={r.title} description={r.rule_id}
-                        endContent={<Text type="supporting" color="secondary" hasTabularNumbers>{countOf(r.fail_count_30d, 'failure', 'failures')}</Text>} />
-                    ))}
-                  </List>
-                ) : <EmptyState icon="check" title="No failures in 30 days" />}
-              </Panel>
-            </>
-          );
-        }}
+    <section aria-label="Policy rulebooks"><VStack gap={6}>
+      <SectionTitle title="Policy rulebooks" description="The rulebook every brief, caption and image is checked against, and the versions waiting for review or activation."
+        actions={<Button variant="secondary" href={RULEBOOKS_PATH}>Rulebooks</Button>} />
+      <QueryState query={{ isPending: list.isPending, isError: list.isError, error: list.error, data: rows, refetch: list.refetch }} what="the rulebooks">
+        {() => (
+          <>
+            <Tiles>
+              <StatCard label="Active rulebook" value={active ? `Version ${active.version}` : 'None'}
+                note={active ? countOf(active.rule_count, 'rule', 'rules') : 'Validation cannot pass anything until one is activated'} />
+              <StatCard label="Waiting for review" value={count('REVIEW')} note="The policy owner approves or rejects" />
+              <StatCard label="Ready to activate" value={count('READY')} note="Approved and built, not in use yet" />
+              <StatCard label="Drafts" value={count('DRAFT')} note="Being written" />
+            </Tiles>
+            <Panel title="Waiting for someone">
+              {waiting.length ? (
+                <List hasDividers>
+                  {waiting.map((b) => (
+                    <ListItem key={b.id} label={`Version ${b.version}`} description={b.name} href={rulebookHref(b.id)}
+                      endContent={<Text type="supporting" color="secondary">{b.lifecycle_state === 'REVIEW' ? 'Waiting for review' : 'Ready to activate'}</Text>} />
+                  ))}
+                </List>
+              ) : <EmptyState icon="check" title="Nothing is waiting" description="No rulebook version is waiting for review or activation." />}
+            </Panel>
+          </>
+        )}
       </QueryState>
-    </VStack>
+    </VStack></section>
   );
 }
 

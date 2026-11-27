@@ -1,6 +1,6 @@
 import { useMemo, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAuth, useSession } from '@/auth/AuthProvider';
+import { useSession } from '@/auth/AuthProvider';
 import { Blockquote } from '@astryxdesign/core/Blockquote';
 import { HStack, VStack } from '@astryxdesign/core/Layout';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
@@ -28,7 +28,6 @@ import {
   paramsWithFilter,
   POLICY_STATUS_TEXT,
   policyLoadState,
-  RULE_ADMIN_PATH,
   type PolicyFilter,
 } from './activePolicy';
 import { RULEBOOKS_PATH } from './admin/paths';
@@ -38,11 +37,10 @@ import { useCanReadRulebooks } from './admin/useRulebooks';
  * Rules (NRC-20 demo slice): the tenant's active policy, read-only. Shows the
  * bundle version and every rule with its severity, mandatory status and the
  * clause it comes from, worded exactly as the API supplies it. No editing,
- * upload or activation here; rule administration comes later.
+ * upload or activation here; policy roles manage rulebooks under Rulebooks.
  */
 export default function ActivePolicyPage(): ReactElement {
   const policy = useActivePolicy();
-  const { can } = useAuth();
   const rulebooks = useCanReadRulebooks();
   const { context } = useSession();
   const state = policyLoadState(policy, !!context.active_policy);
@@ -52,14 +50,7 @@ export default function ActivePolicyPage(): ReactElement {
       <PageHeader
         title="Rules"
         description="The active policy that every brief, caption and image is checked against. Read-only."
-        actions={
-          rulebooks || can('policy:manage') ? (
-            <>
-              {rulebooks && <Button variant="secondary" href={RULEBOOKS_PATH}>Rulebooks</Button>}
-              {can('policy:manage') && <Button variant="secondary" href={RULE_ADMIN_PATH}>Manage rules</Button>}
-            </>
-          ) : undefined
-        }
+        actions={rulebooks ? <Button variant="secondary" href={RULEBOOKS_PATH}>Rulebooks</Button> : undefined}
       />
       {state === 'loading' ? (
         <Loading />
@@ -107,7 +98,7 @@ function SetupRequired(): ReactElement {
 }
 
 function PolicyView({ policy: p }: { policy: PolicyBundle }): ReactElement {
-  // Filters live in the URL: a filtered view can be shared and survives Manage rules and back.
+  // Filters live in the URL: a filtered view can be shared and survives going to Rulebooks and back.
   const [params, setParams] = useSearchParams();
   const filter = useMemo(() => filterFromParams(params), [params]);
   const rows = useMemo(() => filterRules(p.rules, filter), [p.rules, filter]);

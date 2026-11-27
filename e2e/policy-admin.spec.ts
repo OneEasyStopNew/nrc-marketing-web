@@ -290,3 +290,21 @@ test('the policy owner can read policy files but gets no upload form', async ({ 
   await expect(h1(page)).toHaveText('Policy files');
   await expect(page.getByLabel('Upload a policy file', { exact: true })).toHaveCount(0);
 });
+
+/* ---------- Home: the rulebook status for policy roles ---------- */
+
+test('Home shows a policy administrator the active rulebook and what waits, with a link to Rulebooks', async ({ page }) => {
+  await signInAt(page, '/marketing', 'policy-admin');
+  const box = page.getByLabel('Policy rulebooks', { exact: true });
+  await expect(box).toContainText('Version 2');
+  await expect(box).toContainText('Waiting for review');
+  await expect(box.getByRole('link', { name: 'Rulebooks' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Manage rules' })).toHaveCount(0);
+  await box.getByRole('link', { name: 'Rulebooks' }).click();
+  await expect(h1(page)).toHaveText('Rulebooks');
+});
+
+test('Home shows the policy owner the rulebooks waiting for review', async ({ page }) => {
+  await signInAt(page, '/marketing', 'policy-approver');
+  await expect(page.getByLabel('Policy rulebooks', { exact: true })).toContainText('Waiting for review');
+});
